@@ -179,14 +179,32 @@ def sort_versions(versions: list[str]) -> list[str]:
     return [str(version) for version in sorted(Version(text) for text in versions)]
 
 
+_PSEUDO = re.compile(r'v[0-9]+\.(?:0\.0-|\d+\.\d+-(?:[^+]*\.)?0\.)(\d{14})-[A-Za-z0-9]+')
+
+
+def is_pseudo_version(version: str) -> bool:
+    """Whether a version is a pseudo-version, like v0.0.0-20240102030405-abcdef123456"""
+    return bool(_PSEUDO.fullmatch(version))
+
+
 def latest_version(versions: list[str]) -> str | None:
-    """The version `@latest` resolves to: the highest release, or the highest prerelease if there
-    is no release"""
+    """The version `@latest` resolves to: the highest release, else the highest tagged prerelease,
+    else the pseudo-version of the newest commit, as the go command picks it from a list without
+    tagged versions"""
     if not versions:
         return None
     parsed = sorted(Version(text) for text in versions)
     releases = [version for version in parsed if not version.prerelease]
-    return str((releases or parsed)[-1])
+    tagged = [version for version in parsed if not is_pseudo_version(version.text)]
+    if releases or tagged:
+        return str((releases or tagged)[-1])
+    # the newest commit time; of versions with the same time, the first in the list, as Go picks it
+    return str(max(parsed, key=lambda version: _pseudo_time(version.text)))
+
+
+def _pseudo_time(version: str) -> str:
+    match = _PSEUDO.fullmatch(version)
+    return match[1] if match else ''
 
 
 def check_version(path: str, version: str) -> None:

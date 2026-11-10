@@ -12,6 +12,8 @@ A Go module proxy answers GET requests below its URL ([reference](https://go.dev
 | `go/example.com/mod/@v/v1.2.3.zip`  | the module zip                    |
 | `go/example.com/mod/@latest`        | the `.info` of the newest version |
 
+`@latest` is the highest release, else the highest tagged prerelease. A module with only pseudo-versions gets the one of the newest commit, which is the version the go command picks from the list.
+
 Upper case letters in module paths and versions are written as `!` and the lower case letter, as the protocol requires (`Example.com` becomes `!example.com`), so the files work on case-insensitive file systems.
 
 ## go-import pages

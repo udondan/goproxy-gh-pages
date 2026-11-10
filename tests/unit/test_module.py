@@ -233,6 +233,18 @@ def test_sort_versions_semver_precedence() -> None:
         (['v1.0.0', 'v1.1.0-rc.1', 'v0.9.0'], 'v1.0.0'),
         (['v1.1.0-rc.1', 'v1.1.0-beta'], 'v1.1.0-rc.1'),
         (['v1.0.0', 'v1.10.0', 'v1.9.0'], 'v1.10.0'),
+        # without tagged versions, the pseudo-version of the newest commit
+        (
+            ['v0.1.1-0.20240102030405-aaaaaaaaaaaa', 'v0.0.0-20250102030405-bbbbbbbbbbbb'],
+            'v0.0.0-20250102030405-bbbbbbbbbbbb',
+        ),
+        (
+            ['v1.2.4-pre.0.20250102030405-aaaaaaaaaaaa', 'v2.0.0-20240102030405-bbbbbbbbbbbb'],
+            'v1.2.4-pre.0.20250102030405-aaaaaaaaaaaa',
+        ),
+        # a tagged prerelease wins over newer pseudo-versions
+        (['v0.0.0-20250102030405-bbbbbbbbbbbb', 'v0.1.0-rc.1'], 'v0.1.0-rc.1'),
+        (['v1.0.0', 'v1.0.1-0.20250102030405-bbbbbbbbbbbb'], 'v1.0.0'),
     ],
 )
 def test_latest_version(versions: list[str], latest: str | None) -> None:

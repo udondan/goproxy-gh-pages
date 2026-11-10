@@ -163,21 +163,22 @@ class Seeder:
 
     def _index(self, cursor: list[str], pending: set[ModuleVersion]) -> set[ModuleVersion]:
         """The pending versions that are in the module index after the cursor, which moves on, so
-        each poll only reads what is new"""
+        each poll only reads what is new. The cursor moves only when all pages were read, so a
+        failed page doesn't skip the versions on the pages before it."""
         found = set()
+        since = cursor[0]
         for _ in range(100):
-            response = self.client.get(
-                f'{self.index.rstrip("/")}/index?since={urllib.parse.quote(cursor[0])}&limit=2000'
-            )
+            response = self.client.get(f'{self.index.rstrip("/")}/index?since={urllib.parse.quote(since)}&limit=2000')
             lines = [line for line in response.text().splitlines() if line.strip()]
             for line in lines:
                 entry = json.loads(line)
                 module_version = ModuleVersion(entry['Path'], entry['Version'])
                 if module_version in pending:
                     found.add(module_version)
-                cursor[0] = entry['Timestamp']
+                since = entry['Timestamp']
             if len(lines) < 2000:
                 break
+        cursor[0] = since
         return found
 
     def request_pkgsite(self, versions: list[ModuleVersion]) -> None:

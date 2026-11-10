@@ -194,6 +194,21 @@ def test_wait_for_index(server: FakeServer, client: Client, clock: Clock, capsys
     assert 'index: ' in capsys.readouterr().err
 
 
+def test_index_keeps_matches_when_a_later_page_fails(
+    server: FakeServer, client: Client, clock: Clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # v1.0.0 is on the first page; the second page fails once, so the next poll reads both again
+    full = [('example.com/other', 'v1.0.0', f'2023-11-14T22:14:{n % 60:02d}.{n:06d}Z') for n in range(1999)]
+    full.append((M, 'v1.0.0', '2023-11-14T22:15:00Z'))
+    server.route(index_url(SINCE), index_lines(full))
+    replies = iter([Reply(503), Reply(503), Reply(503), Reply(body=b'')])
+    server.route(index_url('2023-11-14T22:15:00Z'), lambda _: next(replies))
+    result = seeder(server, client, clock).wait([V1], ['index'])
+    assert result.available == {'index': {str(V1): 10.0}}
+    assert server.paths().count(index_url(SINCE)) == 2
+    assert 'index: ' in capsys.readouterr().err
+
+
 def test_index_reads_at_most_100_pages_per_poll(server: FakeServer, client: Client, clock: Clock) -> None:
     # a page that doesn't move the cursor must not make a poll read forever
     server.route(index_url(SINCE), index_lines([('example.com/other', 'v1.0.0', SINCE)] * 2000))

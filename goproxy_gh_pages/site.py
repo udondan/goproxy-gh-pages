@@ -192,6 +192,7 @@ def write_site(
     pages: dict[str, tuple[str, Rule, str]] = {}
 
     other_rules = [rule for rule in rules if rule.mode != 'proxy']
+    _check_nesting(other_rules)
 
     def add_page(import_path: str, rule: Rule) -> None:
         directory = page_dir(site, import_path)
@@ -292,14 +293,40 @@ def write_site(
     return SiteResult(proxy_dir=proxy_dir, pages=len(pages), files=files, size=size, warnings=warnings)
 
 
+def _check_nesting(other_rules: list[Rule]) -> None:
+    """A vanity or external prefix covers import paths the build doesn't know, which resolve only
+    through its tag in the 404 page. The go command fails if two tags match an import path, so the
+    unknown paths of a vanity or external prefix under another one can't resolve."""
+    for rule in other_rules:
+        nested = sorted(other.prefix for other in other_rules if other.prefix.startswith(rule.prefix + '/'))
+        if nested:
+            raise ModuleError(
+                f'{", ".join(nested)} can not be under {rule.prefix}, which is served by {rule.mode} {rule.url}: '
+                'GitHub Pages has one 404 page and the go command rejects two matching go-import tags, so the '
+                'import paths of one of them would not resolve'
+            )
+
+
 def _not_found_rules(served: list[ServedModule], rules: list[Rule], proxy_url: str) -> list[Rule]:
     """go-import tags for the 404 page, which GitHub Pages serves for paths without a page, like
     packages of repositories. The go command reads the tags of 404 pages, but fails if two tags
-    match an import path, so a prefix of another one is left out."""
-    candidates = [Rule(module.module, 'mod', proxy_url) for module in served]
-    candidates += [rule for rule in rules if rule.mode != 'proxy']
+    match an import path. The paths under a vanity or external prefix need its tag alone, so a tag
+    with one of them under it is left out: all packages of a module served here have pages. A path
+    without a page under a module served here matches two tags, which the go command treats as a
+    module that doesn't exist, as it does for a missing version."""
+    candidates = {module.module: Rule(module.module, 'mod', proxy_url) for module in served}
+    for rule in rules:
+        if rule.mode != 'proxy':
+            # a module served here wins, as for pages
+            candidates.setdefault(rule.prefix, rule)
+    served_here = {module.module for module in served}
+    unknown_paths = [prefix for prefix in candidates if prefix not in served_here]
     return sorted(
-        (rule for rule in candidates if not any(other.prefix.startswith(rule.prefix + '/') for other in candidates)),
+        (
+            rule
+            for rule in candidates.values()
+            if not any(prefix.startswith(rule.prefix + '/') for prefix in unknown_paths)
+        ),
         key=lambda rule: rule.prefix,
     )
 

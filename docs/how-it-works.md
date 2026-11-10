@@ -27,7 +27,7 @@ To find the source of an import path that has no proxy configured for it, the go
 
 The build writes such a page (`index.html`) for each module and for each package directory in it, since an import path can name any package. proxy.golang.org follows the same tags, so with the default `GOPROXY` the module is fetched from the site once and then served from proxy.golang.org.
 
-GitHub Pages answers paths without a file with `404.html`. The go command reads meta tags of 404 responses too, so the build writes a `404.html` with a tag for every module. This covers import paths the build doesn't know, such as packages of a repository behind a vanity import. The go command fails if two tags match an import path, so a tag whose prefix is the prefix of another tag is left out of the 404 page. Those modules have their own pages.
+GitHub Pages answers paths without a file with `404.html`. The go command reads meta tags of 404 responses too, so the build writes a `404.html` with a tag for every module. This covers import paths the build doesn't know, such as packages of a repository behind a vanity import. The go command fails if two tags match an import path. Paths under a vanity or external prefix need its tag alone, so the tag of a module that has one of them nested under it is left out of the 404 page; every package of a module served by the site has its own page. A path without a page under a module served by the site matches two tags then, which the go command treats as a module that doesn't exist. A vanity or external prefix under another one can't work this way, so the build rejects it.
 
 ## The manifest
 

@@ -262,9 +262,10 @@ def test_write_site_longest_prefix_wins(tmp_path: Path) -> None:
     assert metas(deep, 'go-import') == [f'{SITE}/mod/inner mod {PROXY}']
     assert f'<title>{SITE}/mod/inner/deep</title>' in deep
     assert result.pages == 3
-    # 404 page: a prefix of another prefix would make two tags match, so it is left out
+    # 404 page: all packages of served modules have pages, so both tags stay, and the served module
+    # wins over the rule of the same prefix
     not_found = read(output / '404.html')
-    assert metas(not_found, 'go-import') == [f'{SITE}/mod/inner mod {PROXY}']
+    assert metas(not_found, 'go-import') == [f'{SITE}/mod mod {PROXY}', f'{SITE}/mod/inner mod {PROXY}']
     manifest = json.loads(read(output / 'go' / 'index.json'))
     assert manifest['modules'][f'{SITE}/mod'] == {'mode': 'git', 'url': 'https://github.com/o/mod'}
 
@@ -284,6 +285,27 @@ def test_write_site_rule_inside_a_module_covers_its_packages(tmp_path: Path) -> 
         assert metas(read(directory / 'index.html'), 'go-import') == [external.go_import]
     assert f'<title>{SITE}/lib/external/sub</title>' in read(output / 'lib' / 'external' / 'sub' / 'index.html')
     assert result.pages == 3
+    # the external modules need their tag alone; the packages of lib have pages
+    assert metas(read(output / '404.html'), 'go-import') == [external.go_import]
+
+
+def test_write_site_module_under_a_vanity_prefix(tmp_path: Path) -> None:
+    generated = served(tmp_path, f'{SITE}/repo/generated', ['v1.0.0'], {'g.go': 'package g\n'})
+    output = tmp_path / 'site'
+    vanity = Rule(f'{SITE}/repo', 'git', 'https://github.com/o/repo')
+    build_site(output, [generated], rules=[vanity])
+    # other modules and packages in the repository resolve through the 404 page
+    assert metas(read(output / '404.html'), 'go-import') == [vanity.go_import, f'{SITE}/repo/generated mod {PROXY}']
+
+
+@pytest.mark.parametrize('inner_mode', ['git', 'mod'])
+def test_write_site_rejects_a_vanity_or_external_prefix_under_another(tmp_path: Path, inner_mode: str) -> None:
+    rules = [
+        Rule(f'{SITE}/sdk', 'mod', 'https://proxy.example.net'),
+        Rule(f'{SITE}/sdk/special', inner_mode, 'https://other.example.net'),
+    ]
+    with pytest.raises(ModuleError, match=r'sdk/special can not be under .*/sdk, which is served by mod'):
+        build_site(tmp_path / 'site', [], rules=rules)
 
 
 def test_write_site_vanity_and_external_rules(tmp_path: Path) -> None:

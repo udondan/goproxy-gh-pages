@@ -41,6 +41,8 @@ The site only redirects the import path to another proxy, which must serve the m
 
 All modes can be combined on one site. When prefixes overlap, the longest one wins for each page, the same way the go command picks the module with the longest matching path.
 
+Modules served by this site can be nested under any prefix, such as a generated module in a subdirectory of a repository with a vanity import. A vanity or external prefix can't be nested under another vanity or external prefix: the paths under both have no pages of their own and resolve only through their tags in the 404 page, which GitHub Pages has only one of, and the go command fails if two tags match an import path. The build rejects that.
+
 ```text
 go.example.com/client
 go.example.com/client/v2

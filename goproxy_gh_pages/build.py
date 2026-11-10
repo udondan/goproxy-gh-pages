@@ -136,13 +136,15 @@ def build(options: BuildOptions, client: Client) -> BuildResult:
     ignored: set[str] = set()
 
     def served_here(module: str) -> bool:
-        for rule in other_rules:
-            if rule.covers(module):
-                if module not in ignored:
-                    github.warning(f'{module} is served by {rule.go_import}, so its zips are ignored')
-                    ignored.add(module)
-                return False
-        if proxy_rules and not any(rule.covers(module) for rule in proxy_rules):
+        # the longest prefix wins, as for go-import pages
+        matching = [rule for rule in rules if rule.covers(module)]
+        rule = max(matching, key=lambda rule: len(rule.prefix)) if matching else None
+        if rule and rule.mode != 'proxy':
+            if module not in ignored:
+                github.warning(f'{module} is served by {rule.go_import}, so its zips are ignored')
+                ignored.add(module)
+            return False
+        if proxy_rules and not rule:
             if module not in ignored:
                 github.log(f'Ignoring {module}, which is not in modules')
                 ignored.add(module)
@@ -272,7 +274,7 @@ def build(options: BuildOptions, client: Client) -> BuildResult:
             for entry in selected
             if entry.local
             and entry.asset
-            and entry.asset.digest
+            # without a digest, only the download shows whether the asset is the same zip
             and entry.asset.digest != f'sha256:{fetched[entry.key].sha256}'
         ]
         parallel(fetcher.fetch, compare, workers)

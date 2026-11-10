@@ -241,8 +241,32 @@ def test_local_zip_matching_release_asset(server: FakeServer, client: Client, tm
     )
     result = build(options(server, tmp_path, repository=REPO, release_assets=['*.zip'], zips=[local.path]), client)
     assert result.sources == {'local': 1}
-    # the asset with a different digest was downloaded and compared
+    # the assets with a different digest or none were downloaded and compared
     assert '/assets/1' in server.paths()
+    assert '/assets/2' in server.paths()
+
+
+def test_local_zip_differing_from_release_asset_without_digest(
+    server: FakeServer, client: Client, tmp_path: Path
+) -> None:
+    local = make_zip(tmp_path, M, 'v1.0.0', name='local')
+    released = make_zip(tmp_path, M, 'v1.0.0', {'lib.go': 'package lib // other\n'}, name='released')
+    data = Path(released.path).read_bytes()
+    serve_releases(server, REPO, [{'tag': 'v1.0.0', 'assets': [asset(server, 1, 'lib.zip', data, digest=None)]}])
+    with pytest.raises(ConflictError):
+        build(options(server, tmp_path, repository=REPO, release_assets=['*.zip'], zips=[local.path]), client)
+
+
+def test_longest_rule_wins(server: FakeServer, client: Client, tmp_path: Path) -> None:
+    generated = make_zip(tmp_path, f'{M}/generated', 'v1.0.0')
+    other = make_zip(tmp_path, f'{M}/other', 'v1.0.0')
+    modules = f'{M} git https://github.com/owner/lib\n{M}/generated proxy'
+    result = build(options(server, tmp_path, modules=modules, zips=[generated.path, other.path]), client)
+    assert result.modules == {f'{M}/generated': ['v1.0.0'], M: []}
+    out = tmp_path / 'out'
+    assert (out / 'go' / M / 'generated' / '@v' / 'v1.0.0.zip').exists()
+    assert f'{M}/generated mod {server.url}/site/go' in (out / 'lib' / 'generated' / 'index.html').read_text()
+    assert 'git https://github.com/owner/lib' in (out / 'lib' / 'index.html').read_text()
 
 
 def test_retention(server: FakeServer, client: Client, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -14,7 +14,7 @@ from goproxy_gh_pages import __version__
 from goproxy_gh_pages.cli import InputError, client_for, lines, main, parse_bool, parse_int, parse_size
 from goproxy_gh_pages.net import Client
 from goproxy_gh_pages.seed import Seeder
-from tests.unit.conftest import FakeServer, Reply, write_module
+from tests.unit.conftest import FakeServer, Reply, Request, write_module
 from tests.unit.proxyfakes import (
     make_zip,
     manifest_entry,
@@ -340,6 +340,35 @@ def test_seed_warns_when_the_site_does_not_serve_a_version(
     assert f'{M}@v1.1.0: ' in captured.err
     # only the version the site serves was seeded
     assert f'/proxy/{M}/@v/v1.0.0.info' not in server.paths()
+
+
+def test_seed_reads_the_hashes_of_the_new_deployment(
+    server: FakeServer, fast: Clock, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    zip_file = make_zip(tmp_path, M, 'v1.0.0')
+    seed_routes(server)
+    serve_sumdb(server, '/sumdb', M, 'v1.0.0', 'h1:other=', zip_file.mod_h1)
+
+    def deployed(request: Request) -> Reply:
+        # the manifest appears with the new deployment
+        serve_manifest(server, '/site/go', {M: {'v1.0.0': manifest_entry(zip_file)}})
+        return Reply(body=b'{}')
+
+    server.route(f'/site/go/{M}/@v/v1.0.0.info', deployed)
+    argv = [
+        'seed',
+        f'{M}@v1.0.0',
+        '--site-url',
+        f'{server.url}/site/go',
+        '--wait-for',
+        'sumdb',
+        '--proxy',
+        f'{server.url}/proxy',
+        '--sumdb',
+        f'{server.url}/sumdb',
+    ]
+    assert main(argv) == 1
+    assert f'{M}@v1.0.0 has the hashes' in output(capsys)
 
 
 def test_wait_does_not_seed(server: FakeServer, fast: Clock, capsys: pytest.CaptureFixture[str]) -> None:

@@ -274,12 +274,6 @@ def _seed(
     start = seeder.clock()
     deadline = start + timeout
     problems: list[str] = []
-    if site_url:
-        manifest = read_manifest(client, site_url) or {}
-        for version in versions:
-            known = manifest.get(version.path, {}).get(version.version)
-            if known and known.h1 and known.mod_h1:
-                seeder.expected[version] = (known.h1, known.mod_h1)
     to_seed = versions
     if seed and site_url:
         github.log(f'Waiting until {site_url} serves {len(versions)} versions')
@@ -287,6 +281,13 @@ def _seed(
         if not_live:
             problems.append('the site does not serve ' + ', '.join(str(version) for version in not_live))
             to_seed = [version for version in versions if version not in not_live]
+    if site_url:
+        # read after the wait, so the manifest is the one of the new deployment
+        manifest = read_manifest(client, site_url) or {}
+        for version in versions:
+            known = manifest.get(version.path, {}).get(version.version)
+            if known and known.h1 and known.mod_h1:
+                seeder.expected[version] = (known.h1, known.mod_h1)
     if seed:
         problems += seeder.seed(to_seed)
     result = seeder.wait(to_seed, targets, started=start) if targets else None

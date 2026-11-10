@@ -22,6 +22,8 @@ from goproxy_gh_pages.modzip import ZipError, file_sha256, read_zip
 from goproxy_gh_pages.net import Client, HTTPError
 
 MANIFEST = 'index.json'
+# the source of a zip from the live site
+LIVE_SOURCE = 'live site'
 _TAIL = 64 << 10
 
 T = TypeVar('T')
@@ -231,7 +233,7 @@ class Fetcher:
             attempts.append(('local', lambda: local))
         if candidate.live and self.proxy_url:
             live_url = proxy_file_url(self.proxy_url, candidate.module, escape(candidate.version) + '.zip')
-            attempts.append(('live site', lambda: self._download(live_url, candidate, 'live')))
+            attempts.append((LIVE_SOURCE, lambda: self._download(live_url, candidate, 'live')))
         if candidate.asset:
             asset = candidate.asset
             attempts.append(
@@ -302,6 +304,7 @@ def read_local(path: str) -> tuple[Candidate, Fetched]:
 
 
 __all__ = [
+    'LIVE_SOURCE',
     'MANIFEST',
     'Candidate',
     'ConflictError',

@@ -245,6 +245,37 @@ def test_unreadable_live_zip_without_manifest(server: FakeServer, client: Client
         build(options(server, tmp_path, zips=[published.path]), client)
 
 
+def test_release_asset_conflicting_with_the_live_site_without_manifest(
+    server: FakeServer, client: Client, tmp_path: Path
+) -> None:
+    published = make_zip(tmp_path, M, 'v1.0.0', name='published')
+    changed = make_zip(tmp_path, M, 'v1.0.0', {'lib.go': 'package lib // changed\n'}, name='changed')
+    serve_proxy(server, LIVE, M, {'v1.0.0': published})
+    data = Path(changed.path).read_bytes()
+    serve_releases(server, REPO, [{'tag': 'v1.0.0', 'assets': [asset(server, 1, 'lib.zip', data)]}])
+    with pytest.raises(ConflictError, match=r'from release asset v1\.0\.0/lib\.zip .* must never change'):
+        build(options(server, tmp_path, repository=REPO, release_assets=['*.zip'], mirror=False), client)
+
+
+def test_release_asset_matching_the_live_site_without_manifest(
+    server: FakeServer, client: Client, tmp_path: Path
+) -> None:
+    published = make_zip(tmp_path, M, 'v1.0.0')
+    serve_proxy(server, LIVE, M, {'v1.0.0': published})
+    data = Path(published.path).read_bytes()
+    serve_releases(server, REPO, [{'tag': 'v1.0.0', 'assets': [asset(server, 1, 'lib.zip', data)]}])
+    result = build(options(server, tmp_path, repository=REPO, release_assets=['*.zip'], mirror=False), client)
+    assert result.sources == {'release': 1}
+    assert result.new_versions == []
+    assert f'{LIVE}/{M}/@v/v1.0.0.zip' in server.paths()
+
+    # mirrored, the zip of the live site is served and not downloaded again to compare
+    server.requests.clear()
+    mirrored = options(server, tmp_path, repository=REPO, release_assets=['*.zip'], output=str(tmp_path / 'mirrored'))
+    assert build(mirrored, client).sources == {'live': 1}
+    assert server.paths().count(f'{LIVE}/{M}/@v/v1.0.0.zip') == 1
+
+
 def test_local_zip_differing_from_release_asset(server: FakeServer, client: Client, tmp_path: Path) -> None:
     local = make_zip(tmp_path, M, 'v1.0.0', name='local')
     released = make_zip(tmp_path, M, 'v1.0.0', {'lib.go': 'package lib // other\n'}, name='released')

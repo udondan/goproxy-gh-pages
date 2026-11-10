@@ -4,6 +4,7 @@ that is only sent to the GitHub API and never along redirects."""
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import random
@@ -123,7 +124,8 @@ class Client:
                     attempt += 1
                     continue
                 raise HTTPError(url, error.code, str(error.reason)) from None
-            except (urllib.error.URLError, OSError) as error:
+            except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+                # HTTPException: a response cut off before its end (IncompleteRead) or malformed
                 # nothing listens there, so waiting doesn't help
                 refused = isinstance(error, ConnectionRefusedError) or isinstance(
                     getattr(error, 'reason', None), ConnectionRefusedError
@@ -150,12 +152,18 @@ class Client:
         """Streams a URL into a file and returns the sha256 of the content"""
         temporary = path + '.part'
 
-        def consume(response: IO[bytes]) -> str:
+        def consume(response: Any) -> str:
             digest = hashlib.sha256()
+            written = 0
             with open(temporary, 'wb') as file:
                 while chunk := response.read(_CHUNK):
                     digest.update(chunk)
                     file.write(chunk)
+                    written += len(chunk)
+            # reads of a given size end early without an error when the connection closes
+            length = response.headers.get('Content-Length', '')
+            if length.isdigit() and int(length) != written:
+                raise http.client.IncompleteRead(b'', int(length) - written)
             return digest.hexdigest()
 
         try:

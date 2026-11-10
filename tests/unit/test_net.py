@@ -4,6 +4,7 @@ import hashlib
 import itertools
 import json
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -226,6 +227,57 @@ def test_connection_refused_by_a_closed_port() -> None:
         client.get(f'http://127.0.0.1:{port}/x')
     assert raised.value.status == 0
     assert delays == []
+
+
+@pytest.fixture
+def truncating_server() -> Any:
+    """A server that answers the first `truncated` requests with fewer bytes than announced"""
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    listener.listen()
+    state = {'requests': 0, 'truncated': 1}
+
+    def serve() -> None:
+        while True:
+            try:
+                connection, _ = listener.accept()
+            except OSError:
+                return
+            with connection:
+                connection.recv(65536)
+                state['requests'] += 1
+                body = b'abc' if state['requests'] <= state['truncated'] else b'abcdefghij'
+                connection.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n' + body)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    yield f'http://127.0.0.1:{listener.getsockname()[1]}/x', state
+    listener.close()
+    thread.join(5)
+
+
+def test_incomplete_response_is_retried(truncating_server: Any, tmp_path: Path) -> None:
+    url, state = truncating_server
+    delays: list[float] = []
+    client = Client(retries=4, backoff=0, sleep=delays.append)
+    assert client.get(url).body == b'abcdefghij'
+    assert len(delays) == 1
+    state['requests'], state['truncated'] = 0, 1
+    target = tmp_path / 'file'
+    client.download(url, str(target))
+    assert target.read_bytes() == b'abcdefghij'
+
+
+def test_incomplete_responses_fail_after_retries(truncating_server: Any) -> None:
+    url, state = truncating_server
+    state['truncated'] = 100
+    delays: list[float] = []
+    client = Client(retries=2, backoff=0, sleep=delays.append)
+    with pytest.raises(HTTPError) as raised:
+        client.get(url)
+    assert raised.value.status == 0
+    assert state['requests'] == 3
+    assert len(delays) == 2
 
 
 def test_default_timeout() -> None:

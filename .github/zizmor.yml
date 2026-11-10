@@ -1,0 +1,12 @@
+# First-party actions keep their version tags, everything else is pinned to a commit SHA.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "actions/*": ref-pin
+        "github/*": ref-pin
+        "*": hash-pin
+  # The actions of this repository are tested from the checkout with `uses: ./`. actionlint
+  # doesn't know the `$/` syntax yet.
+  self-repository:
+    disable: true

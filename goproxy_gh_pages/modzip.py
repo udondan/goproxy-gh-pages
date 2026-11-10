@@ -510,9 +510,9 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
     time = None
     if archive.comment:
         try:
-            time = json.loads(archive.comment.decode())['Time']
-            parse_time(time)
-        except (ValueError, KeyError, TypeError, AttributeError):
+            # the .info file needs RFC 3339, which is all the go command reads
+            time = format_time(parse_time(json.loads(archive.comment.decode())['Time']))
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, OSError):
             time = None
     if time is None:
         info = archive.getinfo(prefix + 'go.mod') if go_mod is not None else infos[0]

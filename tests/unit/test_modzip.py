@@ -534,6 +534,22 @@ def test_read_zip_ignores_invalid_comments(tmp_path: Path, comment: bytes) -> No
         pytest.fail('comment that is not UTF-8 is not ignored')
 
 
+@pytest.mark.parametrize(
+    ('time', 'expected'),
+    [
+        ('2024-01-02T03:04:05Z', '2024-01-02T03:04:05Z'),
+        ('2024-01-02 03:04:05', '2024-01-02T03:04:05Z'),
+        ('2024-01-02T05:04:05.123456789+02:00', '2024-01-02T03:04:05Z'),
+        ('1704164645', '2024-01-02T03:04:05Z'),
+    ],
+)
+def test_read_zip_normalizes_the_comment_time(tmp_path: Path, time: str, expected: str) -> None:
+    # the .info file needs RFC 3339, which is all the go command reads
+    comment = json.dumps({'Version': 'v1.0.0', 'Time': time}).encode()
+    data = make_zip([(f'{MODULE}@v1.0.0/go.mod', b'module example.com/m\n')], comment=comment)
+    assert read_zip(write_zip(tmp_path, data)).time == expected
+
+
 def test_read_zip_includes_directory_entries_in_the_hash(tmp_path: Path) -> None:
     prefix = f'{MODULE}@v1.0.0/'
     data = make_zip([prefix, (prefix + 'go.mod', b'module example.com/m\n'), prefix + 'pkg/'])

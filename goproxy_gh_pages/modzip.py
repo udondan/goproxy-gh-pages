@@ -449,14 +449,32 @@ def read_zip(path: str | IO[bytes], expect: tuple[str, str] | None = None, hash_
         raise ZipError(f'invalid module zip: {error}') from None
 
 
+_UTF8_FLAG = 0x800
+
+
+def _entry_name(info: zipfile.ZipInfo) -> str:
+    """The name of a zip entry as Go reads it: the stored bytes as UTF-8, with or without the
+    UTF-8 flag. Python decodes names without the flag as CP437 and, on Windows, replaces
+    backslashes, so this undoes both."""
+    name = info.orig_filename
+    if info.flag_bits & _UTF8_FLAG:
+        return name
+    raw = name.encode('cp437')
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        raise ZipError(f'{raw!r}: malformed file path: invalid UTF-8') from None
+
+
 def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_files: bool) -> ModuleZip:
     infos = archive.infolist()
     if not infos:
         raise ZipError('empty zip file')
-    module, sep, rest = infos[0].filename.partition('@')
+    names = [_entry_name(info) for info in infos]
+    module, sep, rest = names[0].partition('@')
     version = rest.split('/', 1)[0]
     if not sep or '/' not in rest:
-        raise ZipError(f'not a module zip: {infos[0].filename!r} is not in a <module>@<version>/ directory')
+        raise ZipError(f'not a module zip: {names[0]!r} is not in a <module>@<version>/ directory')
     prefix = f'{module}@{version}/'
     try:
         check_version(module, version)
@@ -466,10 +484,10 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
         raise ZipError(f'zip has {module}@{version}, expected {expect[0]}@{expect[1]}')
     # (name, size, is a file): directories are checked like files, as CheckZip does
     files: list[tuple[str, int, bool]] = []
-    for info in infos:
-        if not info.filename.startswith(prefix):
-            raise ZipError(f'{info.filename!r} is not in {prefix}')
-        name = info.filename[len(prefix) :]
+    for info, entry in zip(infos, names, strict=True):
+        if not entry.startswith(prefix):
+            raise ZipError(f'{entry!r} is not in {prefix}')
+        name = entry[len(prefix) :]
         if not name:
             continue
         is_dir = name.endswith('/')
@@ -499,7 +517,7 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
         go_mod = f'module {module}\n'.encode()
     h1 = ''
     if hash_files:
-        h1 = _hash1({info.filename: _read_member(archive, info) for info in infos})
+        h1 = _hash1({entry: _read_member(archive, info) for info, entry in zip(infos, names, strict=True)})
     return ModuleZip(
         module=module,
         version=version,

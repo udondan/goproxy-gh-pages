@@ -542,6 +542,30 @@ def test_read_zip_includes_directory_entries_in_the_hash(tmp_path: Path) -> None
     assert module_zip.h1 == hash1({prefix: b'', prefix + 'go.mod': b'module example.com/m\n', prefix + 'pkg/': b''})
 
 
+def unflagged(data: bytes, placeholder: bytes, name: bytes) -> bytes:
+    """Replaces an ASCII name in a zip with bytes of the same length, without the UTF-8 flag, as
+    zip tools like Info-ZIP write UTF-8 names"""
+    assert len(placeholder) == len(name)
+    assert data.count(placeholder) == 2  # the local header and the central directory
+    return data.replace(placeholder, name)
+
+
+def test_read_zip_unflagged_utf8_names(tmp_path: Path) -> None:
+    prefix = f'{MODULE}@v1.0.0/'
+    go_mod = b'module example.com/m\n'
+    data = make_zip([(prefix + 'go.mod', go_mod), (prefix + 'XX.go', b'package m\n')])
+    module_zip = read_zip(write_zip(tmp_path, unflagged(data, b'XX.go', 'é.go'.encode())))
+    assert module_zip.files == ['go.mod', 'é.go']
+    assert module_zip.h1 == hash1({prefix + 'go.mod': go_mod, prefix + 'é.go': b'package m\n'})
+
+
+def test_read_zip_invalid_utf8_name(tmp_path: Path) -> None:
+    prefix = f'{MODULE}@v1.0.0/'
+    data = make_zip([(prefix + 'go.mod', b'module example.com/m\n'), (prefix + 'XX.go', b'')])
+    with pytest.raises(ZipError, match='invalid UTF-8'):
+        read_zip(write_zip(tmp_path, unflagged(data, b'XX.go', b'\xff\xfe.go')))
+
+
 @pytest.mark.parametrize(
     ('entries', 'error'),
     [

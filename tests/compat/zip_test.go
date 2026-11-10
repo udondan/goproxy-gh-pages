@@ -4,6 +4,7 @@
 package compat
 
 import (
+	stdzip "archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -486,5 +487,50 @@ func TestLegacyZips(t *testing.T) {
 				t.Errorf("time %s, expected the time of go.mod in the zip", v.time)
 			}
 		})
+	}
+}
+
+// Zip tools like Info-ZIP store UTF-8 names without the UTF-8 flag. Go reads the names as UTF-8
+// either way, so the zip must be read with the same names and hash.
+func TestUnflaggedUTF8Names(t *testing.T) {
+	const prefix = "example.com/utf8@v1.0.0/"
+	path := filepath.Join(t.TempDir(), "utf8.zip")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := stdzip.NewWriter(file)
+	entries := []struct{ name, content string }{
+		{"go.mod", "module example.com/utf8\n"},
+		{"é.go", "package utf8\n"},
+		{"dir/ñ/x.go", "package ñ\n"},
+	}
+	for _, entry := range entries {
+		header := &stdzip.FileHeader{Name: prefix + entry.name, Method: stdzip.Deflate, NonUTF8: true}
+		w, err := writer.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(w, entry.content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mv := module.Version{Path: "example.com/utf8", Version: "v1.0.0"}
+	checked, err := zip.CheckZip(mv, path)
+	if err != nil || len(checked.Valid) != len(entries) {
+		t.Fatalf("CheckZip: %v (valid %v, invalid %v)", err, checked.Valid, checked.Invalid)
+	}
+	h1, err := dirhash.HashZip(path, dirhash.Hash1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := verify(t, path); v.h1 != h1 || v.module != mv.Path || v.version != mv.Version {
+		t.Errorf("verify: %+v, dirhash %s", v, h1)
 	}
 }

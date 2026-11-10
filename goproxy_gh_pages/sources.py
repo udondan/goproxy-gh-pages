@@ -151,9 +151,23 @@ def first_zip_entry(tail: bytes, size: int, fetch: Callable[[int, int], bytes]) 
     if position < 0 or len(tail) - position < 22:
         return None
     entries, cd_size, cd_offset = struct.unpack('<10xHII', tail[position : position + 20])
-    if entries == 0 or cd_offset == 0xFFFFFFFF or entries == 0xFFFF:
-        return None  # empty, or zip64
     tail_start = size - len(tail)
+    # a zip with more than 65535 files, as pack writes for big modules, has a zip64 end record,
+    # which a locator right before the end record points to
+    locator = tail[position - 20 : position] if position >= 20 else b''
+    if locator[:4] == b'PK\x06\x07':
+        (record_offset,) = struct.unpack('<Q', locator[8:16])
+        if record_offset >= tail_start:
+            record = tail[record_offset - tail_start : record_offset - tail_start + 56]
+        else:
+            record = fetch(record_offset, record_offset + 55)
+        if len(record) < 56 or record[:4] != b'PK\x06\x06':
+            return None
+        entries, cd_size, cd_offset = struct.unpack('<32xQQQ', record)
+    elif cd_offset == 0xFFFFFFFF or cd_size == 0xFFFFFFFF:
+        return None  # zip64 values without a zip64 end record
+    if entries == 0 or cd_offset >= size:
+        return None
     if cd_offset >= tail_start:
         header = tail[cd_offset - tail_start : cd_offset - tail_start + min(cd_size, 46 + 65535)]
     else:

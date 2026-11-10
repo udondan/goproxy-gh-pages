@@ -192,11 +192,40 @@ def _patch_end(
     return data[: position + 8] + struct.pack('<HHII', *values) + data[position + 20 :]
 
 
-def test_first_zip_entry_of_zip64_and_broken_directories() -> None:
+@pytest.fixture(scope='module')
+def zip64() -> bytes:
+    # more than 65535 files make zipfile, and the go command, write a zip64 end record
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(f'{MODULE}@v1.0.0/go.mod', b'module example.com/mod\n')
+        for number in range(0x10000):
+            archive.writestr(f'{MODULE}@v1.0.0/{number}', b'')
+    data = buffer.getvalue()
+    assert b'PK\x06\x06' in data[-100:]
+    return data
+
+
+@pytest.mark.parametrize('tail', [1 << 16, 22 + 20], ids=['record in tail', 'record fetched'])
+def test_first_zip_entry_of_zip64(zip64: bytes, tail: int) -> None:
+    fetch = fetcher_of(zip64)
+    assert first_zip_entry(zip64[-tail:], len(zip64), fetch) == f'{MODULE}@v1.0.0/go.mod'
+
+
+def test_first_zip_entry_of_broken_zip64(zip64: bytes) -> None:
+    locator = len(zip64) - 22 - 20
+    record = struct.unpack('<Q', zip64[locator + 8 : locator + 16])[0]
+    broken = zip64[:record] + b'XXXX' + zip64[record + 4 :]
+    assert first_zip_entry(broken, len(broken), fetcher_of(broken)) is None
+
+
+def test_first_zip_entry_of_zip64_values_and_broken_directories() -> None:
     data = zip_bytes([f'{MODULE}@v1.0.0/go.mod'])
     fetch = fetcher_of(data)
-    assert first_zip_entry(_patch_end(data, entries=0xFFFF), len(data), fetch) is None
+    # 65535 files fit into a zip without zip64
+    assert first_zip_entry(_patch_end(data, entries=0xFFFF), len(data), fetch) == f'{MODULE}@v1.0.0/go.mod'
+    # zip64 values without a zip64 end record
     assert first_zip_entry(_patch_end(data, cd_offset=0xFFFFFFFF), len(data), fetch) is None
+    assert first_zip_entry(_patch_end(data, cd_size=0xFFFFFFFF), len(data), fetch) is None
     # the directory doesn't start with a file header
     assert first_zip_entry(_patch_end(data, cd_offset=1), len(data), fetch) is None
     # the directory is too short for the header or the file name

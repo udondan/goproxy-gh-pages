@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from goproxy_gh_pages import github
 from goproxy_gh_pages.github import Asset, default_base_url, list_releases, matching_assets
 from goproxy_gh_pages.module import ModuleVersion, Version, escape, latest_version, sort_versions
-from goproxy_gh_pages.modzip import format_time, parse_time
+from goproxy_gh_pages.modzip import ZipError, format_time, parse_time
 from goproxy_gh_pages.net import Client, HTTPError
 from goproxy_gh_pages.seed import PROXY, SUMDB, verify_sumdb
 from goproxy_gh_pages.site import Rule, ServedModule, SiteResult, parse_rules, write_site
@@ -268,6 +268,30 @@ def build(options: BuildOptions, client: Client) -> BuildResult:
         os.makedirs(options.work_dir, exist_ok=True)
     work_dir = tempfile.mkdtemp(prefix='goproxy-gh-pages-', dir=options.work_dir)
     try:
+        # without a manifest, the live site's hashes are only known from its zips
+        unknown_live = [
+            key for key in fetched if key.version in live.get(key.path, ()) and not candidates[key].known.h1
+        ]
+        live_fetcher = Fetcher(client, work_dir, proxy_url, None)
+
+        def fetch_live(key: ModuleVersion) -> Fetched | Exception:
+            try:
+                return live_fetcher.fetch(Candidate(key.path, key.version, live=True))
+            except ZipError as error:
+                return error
+
+        for key, published in zip(unknown_live, parallel(fetch_live, unknown_live, workers), strict=True):
+            if isinstance(published, Exception):
+                raise BuildError(
+                    f'{key} is on the live site, but its zip could not be read to compare it with '
+                    f'{fetched[key].path}: {published}'
+                )
+            if published.h1 != fetched[key].h1:
+                raise ConflictError(
+                    f'{key} in {fetched[key].path} has the hash {fetched[key].h1}, but the live site serves '
+                    f'{published.h1}. A published version must never change.'
+                )
+
         fetcher = Fetcher(client, work_dir, proxy_url if options.mirror else None, options.fallback_proxy)
         compare = [
             Candidate(entry.module, entry.version, asset=entry.asset, known=Known(h1=fetched[entry.key].h1))

@@ -217,6 +217,34 @@ def test_conflict_with_the_live_site(server: FakeServer, client: Client, tmp_pat
         build(options(server, tmp_path, zips=[changed.path]), client)
 
 
+def test_conflict_with_the_live_site_without_manifest(server: FakeServer, client: Client, tmp_path: Path) -> None:
+    published = make_zip(tmp_path, M, 'v1.0.0', name='published')
+    changed = make_zip(tmp_path, M, 'v1.0.0', {'lib.go': 'package lib // changed\n'}, name='changed')
+    serve_proxy(server, LIVE, M, {'v1.0.0': published})
+    with pytest.raises(ConflictError, match='must never change'):
+        build(options(server, tmp_path, zips=[changed.path]), client)
+    # also when the site isn't mirrored
+    with pytest.raises(ConflictError, match='must never change'):
+        build(options(server, tmp_path, zips=[changed.path], mirror=False), client)
+
+
+def test_local_zip_matching_the_live_site_without_manifest(server: FakeServer, client: Client, tmp_path: Path) -> None:
+    published = make_zip(tmp_path, M, 'v1.0.0')
+    serve_proxy(server, LIVE, M, {'v1.0.0': published})
+    result = build(options(server, tmp_path, zips=[published.path]), client)
+    assert result.modules == {M: ['v1.0.0']}
+    assert result.new_versions == []
+    assert f'{LIVE}/{M}/@v/v1.0.0.zip' in server.paths()
+
+
+def test_unreadable_live_zip_without_manifest(server: FakeServer, client: Client, tmp_path: Path) -> None:
+    published = make_zip(tmp_path, M, 'v1.0.0')
+    serve_proxy(server, LIVE, M, {'v1.0.0': published})
+    server.route(f'{LIVE}/{M}/@v/v1.0.0.zip', Reply(404))
+    with pytest.raises(BuildError, match='could not be read to compare'):
+        build(options(server, tmp_path, zips=[published.path]), client)
+
+
 def test_local_zip_differing_from_release_asset(server: FakeServer, client: Client, tmp_path: Path) -> None:
     local = make_zip(tmp_path, M, 'v1.0.0', name='local')
     released = make_zip(tmp_path, M, 'v1.0.0', {'lib.go': 'package lib // other\n'}, name='released')

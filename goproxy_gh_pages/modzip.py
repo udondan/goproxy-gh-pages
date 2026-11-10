@@ -388,24 +388,26 @@ def create_zip(
         time=format_time(time),
         files=len(checked.valid),
         size=size,
-        h1=_hash1(hashes),
+        h1=_hash1(hashes.items()),
         mod_h1=mod_h1,
         omitted=omitted,
     )
 
 
-def _hash1(hashes: dict[str, str]) -> str:
+def _hash1(hashes: Iterable[tuple[str, str]]) -> str:
+    """dirhash.Hash1 of (name, sha256 hex) pairs. A name that is in a zip more than once, which
+    zips can have for directories, counts as often as it is there."""
     summary = hashlib.sha256()
-    for name in sorted(hashes):
+    for name, digest in sorted(hashes):
         if '\n' in name:
             raise ZipError('file names with newlines are not supported')
-        summary.update(f'{hashes[name]}  {name}\n'.encode())
+        summary.update(f'{digest}  {name}\n'.encode())
     return 'h1:' + base64.b64encode(summary.digest()).decode()
 
 
 def hash_go_mod(data: bytes) -> str:
     """The h1 hash of a go.mod file, which sum.golang.org has as `<module> <version>/go.mod`"""
-    return _hash1({'go.mod': hashlib.sha256(data).hexdigest()})
+    return _hash1([('go.mod', hashlib.sha256(data).hexdigest())])
 
 
 @dataclass
@@ -450,6 +452,8 @@ def read_zip(path: str | IO[bytes], expect: tuple[str, str] | None = None, hash_
 
 
 _UTF8_FLAG = 0x800
+# the compression methods archive/zip can read
+_GO_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
 
 
 def _entry_name(info: zipfile.ZipInfo) -> str:
@@ -487,6 +491,11 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
     for info, entry in zip(infos, names, strict=True):
         if not entry.startswith(prefix):
             raise ZipError(f'{entry!r} is not in {prefix}')
+        if info.compress_type not in _GO_METHODS:
+            raise ZipError(
+                f'{entry!r}: unsupported compression method {info.compress_type}; '
+                'the go command reads only stored and deflated files'
+            )
         name = entry[len(prefix) :]
         if not name:
             continue
@@ -517,7 +526,9 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
         go_mod = f'module {module}\n'.encode()
     h1 = ''
     if hash_files:
-        h1 = _hash1({entry: _read_member(archive, info) for info, entry in zip(infos, names, strict=True)})
+        # like dirhash.HashZip: every entry, with the content of the last entry of its name
+        digests = {entry: _read_member(archive, info) for info, entry in zip(infos, names, strict=True)}
+        h1 = _hash1((entry, digests[entry]) for entry in names)
     return ModuleZip(
         module=module,
         version=version,

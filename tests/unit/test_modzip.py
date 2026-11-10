@@ -478,7 +478,7 @@ def test_hash_go_mod() -> None:
 
 def test_hash1_rejects_newlines() -> None:
     with pytest.raises(ZipError, match='newlines'):
-        modzip._hash1({'a\nb': '00'})
+        modzip._hash1([('a\nb', '00')])
 
 
 # read_zip
@@ -540,6 +540,30 @@ def test_read_zip_includes_directory_entries_in_the_hash(tmp_path: Path) -> None
     module_zip = read_zip(write_zip(tmp_path, data))
     assert module_zip.files == ['go.mod']
     assert module_zip.h1 == hash1({prefix: b'', prefix + 'go.mod': b'module example.com/m\n', prefix + 'pkg/': b''})
+
+
+def test_read_zip_counts_repeated_directory_entries(tmp_path: Path) -> None:
+    prefix = f'{MODULE}@v1.0.0/'
+    go_mod = b'module example.com/m\n'
+    with pytest.warns(UserWarning, match='Duplicate name'):
+        data = make_zip([(prefix + 'go.mod', go_mod), prefix + 'pkg/', prefix + 'pkg/'])
+    module_zip = read_zip(write_zip(tmp_path, data))
+    assert module_zip.files == ['go.mod']
+    # dirhash.HashZip has a line for each entry
+    empty = hashlib.sha256(b'').hexdigest()
+    lines = f'{hashlib.sha256(go_mod).hexdigest()}  {prefix}go.mod\n' + f'{empty}  {prefix}pkg/\n' * 2
+    assert module_zip.h1 == 'h1:' + base64.b64encode(hashlib.sha256(lines.encode()).digest()).decode()
+    assert module_zip.h1 != hash1({prefix + 'go.mod': go_mod, prefix + 'pkg/': b''})
+
+
+@pytest.mark.parametrize('method', [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_read_zip_rejects_compression_go_cannot_read(tmp_path: Path, method: int) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr(f'{MODULE}@v1.0.0/go.mod', b'module example.com/m\n')
+        archive.writestr(f'{MODULE}@v1.0.0/m.go', b'package m\n', compress_type=method)
+    with pytest.raises(ZipError, match=f'm.go.: unsupported compression method {method}'):
+        read_zip(write_zip(tmp_path, buffer.getvalue()))
 
 
 def unflagged(data: bytes, placeholder: bytes, name: bytes) -> bytes:
@@ -619,11 +643,11 @@ def test_read_zip_corrupt_data(tmp_path: Path) -> None:
     with pytest.raises(ZipError, match='invalid module zip: Bad CRC-32'):
         read_zip(path)
     assert read_zip(path, hash_files=False).files == ['go.mod', 'm.go']
-    # a compression method zipfile doesn't support
+    # a compression method neither zipfile nor Go supports
     header = data.index(b'PK\x01\x02')  # the central directory entry of go.mod
     unsupported = bytearray(data)
     unsupported[header + 10 : header + 12] = (99).to_bytes(2, 'little')
-    with pytest.raises(ZipError, match='invalid module zip'):
+    with pytest.raises(ZipError, match='unsupported compression method 99'):
         read_zip(write_zip(tmp_path, bytes(unsupported), 'method.zip'))
 
 

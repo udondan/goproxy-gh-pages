@@ -494,20 +494,77 @@ func TestLegacyZips(t *testing.T) {
 // either way, so the zip must be read with the same names and hash.
 func TestUnflaggedUTF8Names(t *testing.T) {
 	const prefix = "example.com/utf8@v1.0.0/"
-	path := filepath.Join(t.TempDir(), "utf8.zip")
+	entries := []zipEntry{
+		{&stdzip.FileHeader{Name: prefix + "go.mod", NonUTF8: true}, "module example.com/utf8\n"},
+		{&stdzip.FileHeader{Name: prefix + "é.go", NonUTF8: true}, "package utf8\n"},
+		{&stdzip.FileHeader{Name: prefix + "dir/ñ/x.go", NonUTF8: true}, "package ñ\n"},
+	}
+	checkLikeGo(t, writeZip(t, entries, nil), module.Version{Path: "example.com/utf8", Version: "v1.0.0"}, 3)
+}
+
+// Go accepts a directory entry that is in a zip more than once, and dirhash hashes each of them
+func TestRepeatedDirectoryEntries(t *testing.T) {
+	const prefix = "example.com/dirs@v1.0.0/"
+	entries := []zipEntry{
+		{&stdzip.FileHeader{Name: prefix + "go.mod"}, "module example.com/dirs\n"},
+		{&stdzip.FileHeader{Name: prefix + "pkg/"}, ""},
+		{&stdzip.FileHeader{Name: prefix + "pkg/"}, ""},
+		{&stdzip.FileHeader{Name: prefix + "pkg/p.go"}, "package pkg\n"},
+	}
+	checkLikeGo(t, writeZip(t, entries, nil), module.Version{Path: "example.com/dirs", Version: "v1.0.0"}, 2)
+}
+
+// archive/zip reads only stored and deflated files, so a zip with other methods must be rejected
+func TestUnsupportedCompression(t *testing.T) {
+	const prefix = "example.com/bzip2@v1.0.0/"
+	const bzip2 = 12
+	entries := []zipEntry{
+		{&stdzip.FileHeader{Name: prefix + "go.mod"}, "module example.com/bzip2\n"},
+		{&stdzip.FileHeader{Name: prefix + "b.go", Method: bzip2}, "package bzip2\n"},
+	}
+	path := writeZip(t, entries, func(writer *stdzip.Writer) {
+		// the content doesn't matter: Go has no bzip2 decompressor for zips
+		writer.RegisterCompressor(bzip2, func(w io.Writer) (io.WriteCloser, error) { return nopCloser{w}, nil })
+	})
+	reader, err := stdzip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if _, err := reader.File[1].Open(); err != stdzip.ErrAlgorithm {
+		t.Fatalf("Go opened the bzip2 file: %v", err)
+	}
+	if out, err := tool(t, "verify", path); err == nil {
+		t.Errorf("verify accepted a zip Go can't read: %s", out)
+	}
+}
+
+type zipEntry struct {
+	header  *stdzip.FileHeader
+	content string
+}
+
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
+
+// writeZip writes a zip with archive/zip; entries without a method are deflated
+func writeZip(t *testing.T, entries []zipEntry, configure func(*stdzip.Writer)) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "m.zip")
 	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writer := stdzip.NewWriter(file)
-	entries := []struct{ name, content string }{
-		{"go.mod", "module example.com/utf8\n"},
-		{"é.go", "package utf8\n"},
-		{"dir/ñ/x.go", "package ñ\n"},
+	if configure != nil {
+		configure(writer)
 	}
 	for _, entry := range entries {
-		header := &stdzip.FileHeader{Name: prefix + entry.name, Method: stdzip.Deflate, NonUTF8: true}
-		w, err := writer.CreateHeader(header)
+		if entry.header.Method == stdzip.Store && !strings.HasSuffix(entry.header.Name, "/") {
+			entry.header.Method = stdzip.Deflate
+		}
+		w, err := writer.CreateHeader(entry.header)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -521,9 +578,14 @@ func TestUnflaggedUTF8Names(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	mv := module.Version{Path: "example.com/utf8", Version: "v1.0.0"}
+	return path
+}
+
+// checkLikeGo checks that Go accepts a zip and that goproxy-gh-pages reads it with the same hash
+func checkLikeGo(t *testing.T, path string, mv module.Version, files int) {
+	t.Helper()
 	checked, err := zip.CheckZip(mv, path)
-	if err != nil || len(checked.Valid) != len(entries) {
+	if err != nil || len(checked.Valid) != files {
 		t.Fatalf("CheckZip: %v (valid %v, invalid %v)", err, checked.Valid, checked.Invalid)
 	}
 	h1, err := dirhash.HashZip(path, dirhash.Hash1)

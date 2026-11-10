@@ -320,7 +320,7 @@ def test_fetch_prefers_live_site(server: FakeServer, client: Client, tmp_path: P
     serve_everywhere(server, module_zip.path)
     result = fetcher(server, client, tmp_path).fetch(full_candidate(server))
     assert result.source == 'live site'
-    assert result.path == str(tmp_path / 'work' / 'live' / 'example.com_mod@v1.0.0.zip')
+    assert result.path == str(tmp_path / 'work' / 'live' / 'example.com' / 'mod' / '@v' / 'v1.0.0.zip')
     assert Path(result.path).read_bytes() == Path(module_zip.path).read_bytes()
     assert server.paths() == [f'/live/{MODULE}/@v/v1.0.0.zip']
 
@@ -333,7 +333,7 @@ def test_fetch_falls_through_sources(server: FakeServer, client: Client, tmp_pat
     server.route(f'/fallback/{MODULE}/@v/v1.0.0.zip', data)
     result = fetcher(server, client, tmp_path).fetch(full_candidate(server))
     assert result.source == f'{server.url}/fallback'
-    assert result.path == str(tmp_path / 'work' / 'fallback' / 'example.com_mod@v1.0.0.zip')
+    assert result.path == str(tmp_path / 'work' / 'fallback' / 'example.com' / 'mod' / '@v' / 'v1.0.0.zip')
     assert server.paths() == [f'/live/{MODULE}/@v/v1.0.0.zip', '/assets/1', f'/fallback/{MODULE}/@v/v1.0.0.zip']
     assert server.requests[1].headers['Accept'] == 'application/octet-stream'
 
@@ -342,7 +342,7 @@ def test_fetch_from_release_asset(server: FakeServer, client: Client, tmp_path: 
     serve_everywhere(server, module_zip.path)
     result = fetcher(server, client, tmp_path, live=False).fetch(full_candidate(server))
     assert result.source == 'release asset v1.0.0/mod.zip'
-    assert result.path == str(tmp_path / 'work' / 'assets' / 'example.com_mod@v1.0.0.zip')
+    assert result.path == str(tmp_path / 'work' / 'assets' / 'example.com' / 'mod' / '@v' / 'v1.0.0.zip')
 
 
 def test_fetch_fails_without_valid_source(server: FakeServer, client: Client, tmp_path: Path) -> None:
@@ -416,7 +416,7 @@ def test_fetch_escapes_module_paths(server: FakeServer, client: Client, tmp_path
     server.route('/live/example.com/!upper/!case/@v/v1.0.0.zip', Path(upper.path).read_bytes())
     candidate = Candidate('example.com/Upper/Case', 'v1.0.0', live=True)
     result = fetcher(server, client, tmp_path).fetch(candidate)
-    assert result.path == str(tmp_path / 'work' / 'live' / 'example.com_!upper_!case@v1.0.0.zip')
+    assert result.path == str(tmp_path / 'work' / 'live' / 'example.com' / '!upper' / '!case' / '@v' / 'v1.0.0.zip')
 
 
 def test_candidate_key() -> None:

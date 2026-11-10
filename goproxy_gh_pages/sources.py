@@ -216,8 +216,9 @@ class Fetcher:
         self.fallback_url = fallback_url
 
     def _download(self, url: str, candidate: Candidate, kind: str, headers: dict[str, str] | None = None) -> str:
+        # the proxy layout: module paths can't contain @, so no two module versions share a path
         path = os.path.join(
-            self.work_dir, kind, escape(candidate.module).replace('/', '_') + '@' + candidate.version + '.zip'
+            self.work_dir, kind, *escape(candidate.module).split('/'), '@v', escape(candidate.version) + '.zip'
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.client.download(url, path, headers=headers)

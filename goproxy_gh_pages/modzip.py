@@ -203,18 +203,21 @@ def check_files(
 
 
 def _check_zip_files(files: list[tuple[str, int, bool]], result: CheckedFiles) -> None:
-    """The checks of zip.CheckZip, which accepts vendored files and the like"""
+    """The checks of zip.CheckZip, which accepts vendored files and the like. The third field of a
+    file is False for a directory entry, which is checked but not valid content."""
     collisions = _CollisionChecker()
     remaining = MAX_ZIP_FILE
-    for path, size, _ in files:
+    for path, size, is_file in files:
         if path != posixpath.normpath(path) or path == '..' or path.startswith(('../', '/')):
             result.invalid.append((path, 'file path is not clean'))
             continue
         try:
             check_file_path(path)
-            collisions.check(path, False)
+            collisions.check(path, not is_file)
         except (ModuleError, ZipError) as error:
             result.invalid.append((path, str(error)))
+            continue
+        if not is_file:
             continue
         base = path.rsplit('/', 1)[-1]
         if base.lower() == 'go.mod':
@@ -461,14 +464,16 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
         raise ZipError(f'not a module zip: {error}') from None
     if expect and expect != (module, version):
         raise ZipError(f'zip has {module}@{version}, expected {expect[0]}@{expect[1]}')
+    # (name, size, is a file): directories are checked like files, as CheckZip does
     files: list[tuple[str, int, bool]] = []
     for info in infos:
         if not info.filename.startswith(prefix):
             raise ZipError(f'{info.filename!r} is not in {prefix}')
-        if info.is_dir():
-            continue
         name = info.filename[len(prefix) :]
-        files.append((name, info.file_size, True))
+        if not name:
+            continue
+        is_dir = name.endswith('/')
+        files.append((name[:-1] if is_dir else name, info.file_size, not is_dir))
     # also checks the total uncompressed size
     checked = check_files(files, in_zip=True)
     checked.raise_for_errors()
@@ -502,7 +507,7 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
         go_mod=go_mod,
         h1=h1,
         mod_h1=hash_go_mod(go_mod),
-        files=[name for name, _, _ in files],
+        files=[name for name, _, is_file in files if is_file],
     )
 
 

@@ -562,9 +562,12 @@ def test_read_zip_includes_directory_entries_in_the_hash(tmp_path: Path) -> None
         ([('example.com/m@v1.0.0/../a.go', b'')], 'not clean'),
         ([('example.com/m@v1.0.0/go.mod', b'module example.com/other\n')], 'is not the module example.com/m'),
         ([('example.com/m@v1.0.0/go.mod', b'go 1.21\n')], 'no module directive'),
+        (['example.com/m@v1.0.0/data/', ('example.com/m@v1.0.0/data', b'')], 'both a file and a directory'),
+        (['example.com/m@v1.0.0/a:b/'], 'invalid char'),
+        (['example.com/m@v1.0.0/x/', 'example.com/m@v1.0.0/X/'], 'case-insensitive'),
     ],
 )
-def test_read_zip_invalid(tmp_path: Path, entries: list[tuple[str, bytes]], error: str) -> None:
+def test_read_zip_invalid(tmp_path: Path, entries: list[tuple[str, bytes] | str], error: str) -> None:
     with pytest.raises(ZipError, match=error):
         read_zip(write_zip(tmp_path, make_zip(entries)))
 

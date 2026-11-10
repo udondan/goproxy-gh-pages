@@ -28,6 +28,7 @@ from goproxy_gh_pages.modzip import (
     list_dir,
     parse_time,
     read_zip,
+    vendor_rules_of,
 )
 from tests.unit.conftest import write_module
 
@@ -76,20 +77,45 @@ def symlinks_supported(tmp_path: Path) -> bool:
 
 
 @pytest.mark.parametrize(
-    ('name', 'vendored'),
+    ('name', 'before_1_24', 'since_1_24'),
     [
-        ('vendor/modules.txt', False),
-        ('vendor/a.go', False),
-        ('vendor/a/b.go', True),
-        ('vendor/a/b/c.go', True),
-        ('a/vendor/b.go', True),  # the offset bug of the go command, golang.org/issue/31562
-        ('/vendor/b.go', False),
-        ('vendorx/a/b.go', False),
-        ('a/b.go', False),
+        ('vendor/modules.txt', False, True),
+        ('vendor/a.go', False, False),
+        ('vendor/a/b.go', True, True),
+        ('vendor/a/b/c.go', True, True),
+        ('a/vendor/b.go', True, False),  # the offset bug of older go commands, golang.org/issue/37397
+        ('pkg/vendor/vendor.go', True, False),
+        ('pkg/vendor/foo/foo.go', True, True),
+        ('a/vendor/modules.txt', True, False),
+        ('/vendor/b.go', False, False),
+        ('vendorx/a/b.go', False, False),
+        ('a/b.go', False, False),
     ],
 )
-def test_is_vendored_package(name: str, vendored: bool) -> None:
-    assert is_vendored_package(name) is vendored
+def test_is_vendored_package(name: str, before_1_24: bool, since_1_24: bool) -> None:
+    assert is_vendored_package(name) is before_1_24
+    assert is_vendored_package(name, go_1_24=True) is since_1_24
+
+
+@pytest.mark.parametrize(
+    ('go_mod', 'expected'),
+    [
+        (None, False),
+        (b'module m\n', False),
+        (b'module m\n\ngo 1.23\n', False),
+        (b'module m\n\ngo 1.23.4\n', False),
+        (b'module m\n\ngo 1.24\n', True),
+        (b'module m\n\ngo 1.24rc1\n', True),
+        (b'module m\n\ngo 1.26.0 // comment\n', True),
+        (b'module m\n\n  go 1.25\n', True),
+        (b'module m\n\ngo 2\n', True),
+        (b'module m\n\ngo "1.24"\n', True),
+        (b'module m\n// go 1.24\n', False),
+        (b'module m\ntoolchain go1.25.0\n', False),
+    ],
+)
+def test_vendor_rules_of(go_mod: bytes | None, expected: bool) -> None:
+    assert vendor_rules_of(go_mod) is expected
 
 
 # check_files
@@ -169,12 +195,37 @@ def test_check_files_invalid(path: str, reason: str) -> None:
         (('a.go', 'a.go'), "multiple entries for file 'a.go'"),
         (('dir', 'dir/a.go'), "entry 'dir' is both a file and a directory"),
         (('dir/a.go', 'dir'), "entry 'dir' is both a file and a directory"),
+        (('σ.go', 'ς.go'), "case-insensitive file name collision: 'σ.go' and 'ς.go'"),
+        (('k.go', 'K.go'), "case-insensitive file name collision: 'k.go' and 'K.go'"),
+        (('ß.go', 'ẞ.go'), "case-insensitive file name collision: 'ß.go' and 'ẞ.go'"),
+        (('ΐ.go', 'ΐ.go'), "case-insensitive file name collision: 'ΐ.go' and 'ΐ.go'"),
     ],
 )
 def test_check_files_collisions(paths: tuple[str, str], reason: str) -> None:
     result = check_files(files(*paths))
     assert result.valid == [paths[0]]
     assert result.invalid == [(paths[1], reason)]
+
+
+def test_check_files_no_collision_with_full_case_folding() -> None:
+    # full case folding maps ß to ss, Go's simple folding doesn't
+    assert check_files(files('ß.go', 'ss.go', 'İ.go', 'i.go')).invalid == []
+
+
+def test_check_files_in_zip_size_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(modzip, 'MAX_ZIP_FILE', 10)
+    monkeypatch.setattr(modzip, 'MAX_GO_MOD', 3)
+    monkeypatch.setattr(modzip, 'MAX_LICENSE', 2)
+    result = check_files([('go.mod', 4, True), ('LICENSE', 3, True), ('a.go', 6, True), ('b.go', 6, True)], in_zip=True)
+    assert result.valid == ['a.go', 'b.go']
+    assert [path for path, _ in result.invalid] == ['go.mod', 'LICENSE']
+    assert result.size_error == 'total uncompressed size of module contents too large (max size is 10 bytes)'
+
+
+def test_check_files_in_zip_keeps_what_modules_leave_out() -> None:
+    result = check_files(files('vendor/a/b.go', '.hg_archival.txt', 'sub/a.go'), in_zip=True)
+    assert result.valid == ['vendor/a/b.go', '.hg_archival.txt', 'sub/a.go']
+    assert result.omitted == []
 
 
 def test_check_files_same_directory_twice() -> None:
@@ -244,6 +295,14 @@ def test_list_dir(tmp_path: Path) -> None:
         ('sub', 'directory is in another module'),
         ('vendor/dep/dep.go', 'file is in vendor directory'),
     ]
+
+
+def test_list_dir_without_go_mod(tmp_path: Path) -> None:
+    (tmp_path / 'vendor').mkdir()
+    (tmp_path / 'vendor' / 'modules.txt').write_bytes(b'')
+    listed, omitted = list_dir(str(tmp_path))
+    assert listed == [('vendor/modules.txt', 0, True)]
+    assert omitted == []
 
 
 def test_list_dir_symlinks(tmp_path: Path) -> None:
@@ -371,6 +430,34 @@ def test_create_zip_too_large(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert not (tmp_path / 'm.zip.tmp').exists()
 
 
+def test_create_zip_output_in_module_dir(tmp_path: Path) -> None:
+    root = write_module(tmp_path / 'm', MODULE)
+    output = root / 'dist' / 'm.zip'
+    first = create_zip(str(root), 'v1.0.0', str(output), TIME)
+    (root / 'dist' / 'm.zip.tmp').write_bytes(b'leftover')
+    first_bytes = output.read_bytes()
+    second = create_zip(str(root), 'v1.0.0', str(output), TIME)
+    assert second.h1 == first.h1
+    assert output.read_bytes() == first_bytes
+    assert ('dist/m.zip', 'output of this command') in second.omitted
+    assert read_zip(str(output)).files == ['go.mod', 'lib.go']
+
+
+def test_create_zip_vendor_rules_follow_go_version(tmp_path: Path) -> None:
+    module_files: dict[str, str | bytes] = {
+        'vendor/modules.txt': '',
+        'pkg/vendor/vendor.go': 'package vendor\n',
+        'pkg/vendor/foo/foo.go': 'package foo\n',
+    }
+    old = write_module(tmp_path / 'old', MODULE, module_files)
+    assert create_zip(str(old), 'v1.0.0', str(tmp_path / 'old.zip'), TIME).files == 2
+    assert read_zip(str(tmp_path / 'old.zip')).files == ['go.mod', 'vendor/modules.txt']
+    new = write_module(tmp_path / 'new', MODULE, module_files)
+    (new / 'go.mod').write_bytes(f'module {MODULE}\n\ngo 1.24\n'.encode())
+    assert create_zip(str(new), 'v1.0.0', str(tmp_path / 'new.zip'), TIME).files == 2
+    assert read_zip(str(tmp_path / 'new.zip')).files == ['go.mod', 'pkg/vendor/vendor.go']
+
+
 def test_create_zip_replaces_output(tmp_path: Path) -> None:
     root = write_module(tmp_path / 'm', MODULE)
     output = tmp_path / 'm.zip'
@@ -469,8 +556,10 @@ def test_read_zip_includes_directory_entries_in_the_hash(tmp_path: Path) -> None
         ),
         ([('example.com/m@v1.0.0/a.go', b''), ('example.com/m@v1.0.0/A.go', b'')], 'case-insensitive'),
         ([('example.com/m@v1.0.0/a:b.go', b'')], 'invalid char'),
-        ([('example.com/m@v1.0.0/vendor/x/y.go', b'')], 'leave out: vendor/x/y.go'),
-        ([('example.com/m@v1.0.0/sub/go.mod', b''), ('example.com/m@v1.0.0/sub/a.go', b'')], 'leave out: sub/go.mod'),
+        ([('example.com/m@v1.0.0/a/go.mod', b'')], 'go.mod file not in module root directory'),
+        ([('example.com/m@v1.0.0/GO.MOD', b'')], 'go.mod files must have lowercase names'),
+        ([('example.com/m@v1.0.0/σ.go', b''), ('example.com/m@v1.0.0/ς.go', b'')], 'case-insensitive'),
+        ([('example.com/m@v1.0.0/../a.go', b'')], 'not clean'),
         ([('example.com/m@v1.0.0/go.mod', b'module example.com/other\n')], 'is not the module example.com/m'),
         ([('example.com/m@v1.0.0/go.mod', b'go 1.21\n')], 'no module directive'),
     ],
@@ -531,7 +620,10 @@ def test_read_zip_size_limits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(ZipError, match='module zip too large'):
         read_zip(path)
     monkeypatch.setattr(modzip, 'MAX_ZIP_FILE', 999)
-    with open(path, 'rb') as file, pytest.raises(ZipError, match='module source tree too large'):
+    with (
+        open(path, 'rb') as file,
+        pytest.raises(ZipError, match='total uncompressed size of module contents too large'),
+    ):
         read_zip(file)
 
 

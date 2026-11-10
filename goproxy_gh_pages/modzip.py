@@ -43,21 +43,52 @@ class ZipError(ValueError):
     """A module zip, or the files for one, that the go command would not accept"""
 
 
-def is_vendored_package(name: str) -> bool:
-    """Whether a file is in a vendored package, which module zips leave out. vendor/modules.txt
-    stays. The offset for nested vendor directories is wrong on purpose: the go command has the
-    same bug and fixing it would change the hashes of existing modules (golang.org/issue/31562)."""
+_GO_DIRECTIVE = re.compile(rb'^[ \t]*go[ \t]+"?(\d+)(?:\.(\d+))?', re.MULTILINE)
+
+
+def vendor_rules_of(go_mod: bytes | None) -> bool:
+    """Whether a module uses the vendor rules of Go 1.24 and later, which depend on the go
+    directive of its go.mod file"""
+    match = _GO_DIRECTIVE.search(go_mod or b'')
+    if not match:
+        return False
+    return (int(match[1]), int(match[2] or 0)) >= (1, 24)
+
+
+def is_vendored_package(name: str, go_1_24: bool = False) -> bool:
+    """Whether a file is in a vendored package, which module zips leave out. Before Go 1.24,
+    vendor/modules.txt stays and the offset for nested vendor directories is wrong: the go command
+    keeps that behavior for older modules so their hashes don't change (golang.org/issue/37397)."""
+    if go_1_24 and name == 'vendor/modules.txt':
+        return True
     if name.startswith('vendor/'):
         index = len('vendor/')
-    elif '/vendor/' in name:
-        index = len('/vendor/')
+    elif (position := name.find('/vendor/')) >= 0:
+        index = position + len('/vendor/') if go_1_24 else len('/vendor/')
     else:
         return False
     return '/' in name[index:]
 
 
+# Pairs that Go's simple case folding joins but Python's case folding doesn't
+_FOLD_EXTRA = {'ΐ': 'ΐ', 'ΰ': 'ΰ', 'ﬆ': 'ﬅ'}
+
+
+def _fold_char(char: str) -> str:
+    char = _FOLD_EXTRA.get(char, char)
+    folded = char.casefold()
+    if len(folded) == 1:
+        return folded
+    # full case folding maps some letters to several, which simple folding doesn't (ß and ss)
+    lower = char.lower()
+    return lower if len(lower) == 1 else char
+
+
 def _fold(path: str) -> str:
-    return ''.join(char.lower() if len(char.lower()) == 1 else char for char in path)
+    """A key that is the same for paths Go treats as equal ignoring case (strings.EqualFold)"""
+    if path.isascii():
+        return path.lower()
+    return ''.join(_fold_char(char) for char in path)
 
 
 class _CollisionChecker:
@@ -98,10 +129,18 @@ class CheckedFiles:
             raise ZipError('invalid module files:\n  ' + '\n  '.join(problems))
 
 
-def check_files(files: Iterable[tuple[str, int, bool]]) -> CheckedFiles:
-    """Checks the files of a module, given as (slash path, size, is regular file), like zip.CheckFiles"""
+def check_files(
+    files: Iterable[tuple[str, int, bool]], go_mod: bytes | None = None, in_zip: bool = False
+) -> CheckedFiles:
+    """Checks the files of a module, given as (slash path, size, is regular file), like
+    zip.CheckFiles, or like zip.CheckZip with in_zip, which leaves out nothing. go_mod is the
+    module's go.mod file, which decides the vendor rules."""
     files = list(files)
     result = CheckedFiles()
+    if in_zip:
+        _check_zip_files(files, result)
+        return result
+    go_1_24 = vendor_rules_of(go_mod)
     have_go_mod = {
         path.rsplit('/', 1)[0] + '/' if '/' in path else ''
         for path, _, regular in files
@@ -124,7 +163,7 @@ def check_files(files: Iterable[tuple[str, int, bool]]) -> CheckedFiles:
         if path.startswith('/'):
             result.invalid.append((path, 'file path is not relative'))
             continue
-        if is_vendored_package(path):
+        if is_vendored_package(path, go_1_24):
             result.omitted.append((path, 'file is in vendor directory'))
             continue
         if in_submodule(path):
@@ -163,17 +202,64 @@ def check_files(files: Iterable[tuple[str, int, bool]]) -> CheckedFiles:
     return result
 
 
-def list_dir(module_dir: str) -> tuple[list[tuple[str, int, bool]], list[tuple[str, str]]]:
+def _check_zip_files(files: list[tuple[str, int, bool]], result: CheckedFiles) -> None:
+    """The checks of zip.CheckZip, which accepts vendored files and the like"""
+    collisions = _CollisionChecker()
+    remaining = MAX_ZIP_FILE
+    for path, size, _ in files:
+        if path != posixpath.normpath(path) or path == '..' or path.startswith(('../', '/')):
+            result.invalid.append((path, 'file path is not clean'))
+            continue
+        try:
+            check_file_path(path)
+            collisions.check(path, False)
+        except (ModuleError, ZipError) as error:
+            result.invalid.append((path, str(error)))
+            continue
+        base = path.rsplit('/', 1)[-1]
+        if base.lower() == 'go.mod':
+            if base != path:
+                result.invalid.append((path, 'go.mod file not in module root directory'))
+                continue
+            if path != 'go.mod':
+                result.invalid.append((path, 'go.mod files must have lowercase names'))
+                continue
+        if 0 <= size <= remaining:
+            remaining -= size
+        elif result.size_error is None:
+            result.size_error = (
+                f'total uncompressed size of module contents too large (max size is {MAX_ZIP_FILE} bytes)'
+            )
+        if path == 'go.mod' and size > MAX_GO_MOD:
+            result.invalid.append((path, f'go.mod file too large (max size is {MAX_GO_MOD} bytes)'))
+            continue
+        if path == 'LICENSE' and size > MAX_LICENSE:
+            result.invalid.append((path, f'LICENSE file too large (max size is {MAX_LICENSE} bytes)'))
+            continue
+        result.valid.append(path)
+
+
+def list_dir(module_dir: str, exclude: Iterable[str] = ()) -> tuple[list[tuple[str, int, bool]], list[tuple[str, str]]]:
     """The files of a module directory in walk order, without VCS directories and nested modules,
-    like the file listing of zip.CreateFromDir. Symbolic links are not followed."""
+    like the file listing of zip.CreateFromDir. Symbolic links are not followed. exclude holds
+    slash paths to leave out, such as the zip being written."""
     files: list[tuple[str, int, bool]] = []
     omitted: list[tuple[str, str]] = []
+    excluded = set(exclude)
+    try:
+        with open(os.path.join(module_dir, 'go.mod'), 'rb') as file:
+            go_1_24 = vendor_rules_of(file.read())
+    except OSError:
+        go_1_24 = False
 
     def walk(directory: str, prefix: str) -> None:
         with os.scandir(directory) as entries:
             for entry in sorted(entries, key=lambda entry: entry.name):
                 path = prefix + entry.name
-                if is_vendored_package(path):
+                if path in excluded:
+                    omitted.append((path, 'output of this command'))
+                    continue
+                if is_vendored_package(path, go_1_24):
                     omitted.append((path, 'file is in vendor directory'))
                     continue
                 if entry.is_dir(follow_symlinks=False):
@@ -253,10 +339,13 @@ def create_zip(
     if not os.path.isfile(go_mod):
         raise ZipError(f'{module_dir} has no go.mod file')
     with open(go_mod, 'rb') as file:
-        module = module_path_of_go_mod(file.read())
+        go_mod_data = file.read()
+    module = module_path_of_go_mod(go_mod_data)
     check_version(module, version)
-    files, omitted = list_dir(module_dir)
-    checked = check_files(files)
+    # an output in the module directory, such as from an earlier run, is not part of the module
+    relative = os.path.relpath(os.path.abspath(output), os.path.abspath(module_dir)).replace(os.sep, '/')
+    files, omitted = list_dir(module_dir, exclude=(relative, relative + '.tmp'))
+    checked = check_files(files, go_mod_data)
     checked.raise_for_errors()
     omitted += checked.omitted
     time = max(time.astimezone(timezone.utc), _ZIP_EPOCH).replace(microsecond=0)
@@ -288,8 +377,7 @@ def create_zip(
     finally:
         if os.path.exists(temporary):
             os.remove(temporary)
-    with open(go_mod, 'rb') as file:
-        mod_h1 = hash_go_mod(file.read())
+    mod_h1 = hash_go_mod(go_mod_data)
     return ZipResult(
         path=output,
         module=module,
@@ -382,10 +470,8 @@ def _read_zip(archive: zipfile.ZipFile, expect: tuple[str, str] | None, hash_fil
         name = info.filename[len(prefix) :]
         files.append((name, info.file_size, True))
     # also checks the total uncompressed size
-    checked = check_files(files)
+    checked = check_files(files, in_zip=True)
     checked.raise_for_errors()
-    if checked.omitted:
-        raise ZipError('zip has files that module zips leave out: ' + ', '.join(path for path, _ in checked.omitted))
     go_mod = archive.read(prefix + 'go.mod') if 'go.mod' in checked.valid else None
     if go_mod is not None and module_path_of_go_mod(go_mod) != module:
         raise ZipError(f'go.mod in the zip is not the module {module}')

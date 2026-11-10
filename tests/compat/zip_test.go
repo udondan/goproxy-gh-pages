@@ -174,6 +174,30 @@ var fixtures = []fixture{
 		needsCaseSensitive: true,
 	},
 	{
+		// Go folds σ and ς together, a plain lowercase does not
+		name:               "final sigma collision",
+		module:             "example.com/sigma",
+		version:            "v1.0.0",
+		files:              map[string]string{"s.go": "package s\n", "σ.txt": "a\n", "ς.txt": "b\n"},
+		invalid:            true,
+		needsCaseSensitive: true,
+	},
+	{
+		// from go 1.24 on, vendor/modules.txt is left out and nested vendor dirs are matched correctly
+		name:    "vendor directories with go 1.24",
+		module:  "example.com/vendored124",
+		version: "v1.0.0",
+		files: map[string]string{
+			"go.mod":                      "module example.com/vendored124\n\ngo 1.24\n",
+			"v.go":                        "package v\n",
+			"vendor/modules.txt":          "# example.com/dep v1.0.0\n",
+			"vendor/example.com/dep/d.go": "package dep\n",
+			"pkg/vendor/vendor.go":        "package vendor\n",
+			"pkg/vendor/foo/foo.go":       "package foo\n",
+			"sub/vendor/x/x.go":           "package x\n",
+		},
+	},
+	{
 		name:    "reserved windows name",
 		module:  "example.com/reserved",
 		version: "v1.0.0",

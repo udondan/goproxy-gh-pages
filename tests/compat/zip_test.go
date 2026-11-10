@@ -272,7 +272,7 @@ func pack(t *testing.T, dir, version, output string) (packed, error) {
 	return result, nil
 }
 
-var verifyLine = regexp.MustCompile(`^(.+): (\S+)@(\S+) (\S+) (h1:\S+) go\.mod (h1:\S+)$`)
+var verifyLine = regexp.MustCompile(`^(.+): (\S+)@(\S+) (\S+|unknown time) (h1:\S+) go\.mod (h1:\S+)$`)
 
 type verified struct {
 	module, version, time, h1, modH1 string

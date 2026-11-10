@@ -132,14 +132,14 @@ def client(server: FakeServer) -> Client:
 def write_module(root: Path, module: str, files: Mapping[str, str | bytes] | None = None) -> Path:
     """Writes a module directory with a go.mod and the given files"""
     root.mkdir(parents=True, exist_ok=True)
-    (root / 'go.mod').write_text(f'module {module}\n\ngo 1.21\n')
+    (root / 'go.mod').write_text(f'module {module}\n\ngo 1.21\n', newline='')
     for name, content in (files if files is not None else {'lib.go': 'package lib\n'}).items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(content, bytes):
             path.write_bytes(content)
         else:
-            path.write_text(content)
+            path.write_text(content, newline='')
     return root
 
 

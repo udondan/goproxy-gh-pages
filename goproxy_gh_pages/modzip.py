@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import posixpath
+import re
 import shutil
 import stat
 import zipfile
@@ -218,7 +219,10 @@ def parse_time(text: str) -> datetime:
     text = text.strip()
     if text.isdigit():
         return datetime.fromtimestamp(int(text), timezone.utc)
-    value = datetime.fromisoformat(text.replace('Z', '+00:00'))
+    text = text.replace('Z', '+00:00').replace('z', '+00:00')
+    # Python 3.10 accepts only 3 or 6 digits of fractional seconds
+    text = re.sub(r'\.(\d+)', lambda m: '.' + (m.group(1) + '000000')[:6], text, count=1)
+    value = datetime.fromisoformat(text)
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)

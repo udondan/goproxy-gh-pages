@@ -136,6 +136,16 @@ def test_list_releases(server: FakeServer, client: Client) -> None:
     assert [release.tag for release in github.list_releases(client, 'o/r', limit=1, include_drafts=False)] == ['v1.0.2']
 
 
+def test_list_releases_stops_at_the_limit(server: FakeServer, client: Client) -> None:
+    data = [release_data(server, 2), release_data(server, 1)]
+    next_page = {'Link': f'<{server.url}/repos/o/r/releases?page=2>; rel="next"'}
+    server.route('/repos/o/r/releases?per_page=100', Reply(body=json.dumps(data).encode(), headers=next_page))
+    server.route('/repos/o/r/releases?page=2', Reply(status=404))
+    releases = github.list_releases(client, 'o/r', limit=2, include_drafts=False)
+    assert [release.tag for release in releases] == ['v1.0.2', 'v1.0.1']
+    assert server.paths() == ['/repos/o/r/releases?per_page=100']
+
+
 def test_release_without_optional_fields(server: FakeServer, client: Client) -> None:
     server.route('/repos/o/r/releases?per_page=100', json.dumps([{'id': 1, 'tag_name': 'v1'}]))
     (release,) = github.list_releases(client, 'o/r', limit=5, include_drafts=False)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import socket
 import time
@@ -352,16 +353,16 @@ def test_paginate_follows_links(server: FakeServer, client: Client) -> None:
     )
     server.route('/items?page=2', _page([3, 4], f'{server.url}/items?page=3'))
     server.route('/items?page=3', _page([5], None, f'<{server.url}/items?page=1>; rel="first"'))
-    assert client.paginate(f'{server.url}/items') == [1, 2, 3, 4, 5]
+    assert list(client.paginate(f'{server.url}/items')) == [1, 2, 3, 4, 5]
     assert all(request.headers['Accept'] == 'application/vnd.github+json' for request in server.requests)
 
 
-def test_paginate_stops_at_limit(server: FakeServer, client: Client) -> None:
+def test_paginate_fetches_pages_as_needed(server: FakeServer, client: Client) -> None:
     server.route('/items?state=all&per_page=100', _page([1, 2, 3], f'{server.url}/items?page=2'))
     server.route('/items?page=2', _page([4, 5, 6], None))
-    assert client.paginate(f'{server.url}/items?state=all', limit=2) == [1, 2]
+    assert list(itertools.islice(client.paginate(f'{server.url}/items?state=all'), 3)) == [1, 2, 3]
     assert server.paths() == ['/items?state=all&per_page=100']
-    assert client.paginate(f'{server.url}/items?state=all', limit=4) == [1, 2, 3, 4]
+    assert list(itertools.islice(client.paginate(f'{server.url}/items?state=all'), 4)) == [1, 2, 3, 4]
 
 
 def test_paginate_lower_case_link_header(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -376,4 +377,4 @@ def test_paginate_lower_case_link_header(monkeypatch: pytest.MonkeyPatch) -> Non
         return 200, headers, body
 
     monkeypatch.setattr(client, 'open', open_)
-    assert client.paginate('https://example.com/x') == [1, 2]
+    assert list(client.paginate('https://example.com/x')) == [1, 2]

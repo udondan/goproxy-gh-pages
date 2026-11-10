@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import IO, Any
 
@@ -176,17 +176,16 @@ class Client:
         status, _, _ = self.open(url, ok=ok, consume=consume)
         return status
 
-    def paginate(self, url: str, limit: int | None = None) -> list[Any]:
-        """GETs all pages of a GitHub API list"""
-        items: list[Any] = []
+    def paginate(self, url: str) -> Iterator[Any]:
+        """The items of a GitHub API list. Pages are fetched as the items are used, so a caller
+        that stops early doesn't fetch the rest."""
         separator = '&' if '?' in url else '?'
         next_url: str | None = f'{url}{separator}per_page=100'
-        while next_url and (limit is None or len(items) < limit):
+        while next_url:
             _, headers, body = self.open(next_url, headers={'Accept': 'application/vnd.github+json'})
-            items.extend(json.loads(body))
+            yield from json.loads(body)
             next_url = None
             for link in headers.get('Link', headers.get('link', '')).split(','):
                 url_part, _, rel = link.partition(';')
                 if 'rel="next"' in rel:
                     next_url = url_part.strip().strip('<>')
-        return items if limit is None else items[:limit]

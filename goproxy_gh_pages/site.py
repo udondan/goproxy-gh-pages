@@ -191,10 +191,16 @@ def write_site(
     # module with the longest path
     pages: dict[str, tuple[str, Rule, str]] = {}
 
+    other_rules = [rule for rule in rules if rule.mode != 'proxy']
+
     def add_page(import_path: str, rule: Rule) -> None:
         directory = page_dir(site, import_path)
         if directory is None:
             return
+        # a package under a more specific rule belongs to that rule
+        for other_rule in other_rules:
+            if other_rule.covers(import_path) and len(other_rule.prefix) > len(rule.prefix):
+                rule = other_rule
         other = pages.get(directory)
         if other is None or len(rule.prefix) > len(other[1].prefix):
             pages[directory] = (rule.prefix, rule, import_path)
@@ -241,9 +247,7 @@ def write_site(
         for package in sorted(module.packages | {''}):
             add_page(f'{module.module}/{package}'.rstrip('/'), rule)
 
-    for rule in rules:
-        if rule.mode == 'proxy':
-            continue
+    for rule in other_rules:
         if page_dir(site, rule.prefix) is None:
             raise ModuleError(f'{rule.prefix} is not under {site}, so the site can not serve its go-import page')
         add_page(rule.prefix, rule)

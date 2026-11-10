@@ -269,6 +269,23 @@ def test_write_site_longest_prefix_wins(tmp_path: Path) -> None:
     assert manifest['modules'][f'{SITE}/mod'] == {'mode': 'git', 'url': 'https://github.com/o/mod'}
 
 
+def test_write_site_rule_inside_a_module_covers_its_packages(tmp_path: Path) -> None:
+    files: dict[str, str | bytes] = {
+        'a.go': 'package a\n',
+        'external/e.go': 'package e\n',
+        'external/sub/s.go': 'package s\n',
+    }
+    lib = served(tmp_path, f'{SITE}/lib', ['v1.0.0'], files)
+    output = tmp_path / 'site'
+    external = Rule(f'{SITE}/lib/external', 'mod', 'https://other.example/proxy')
+    result = build_site(output, [lib], rules=[external])
+    assert metas(read(output / 'lib' / 'index.html'), 'go-import') == [f'{SITE}/lib mod {PROXY}']
+    for directory in (output / 'lib' / 'external', output / 'lib' / 'external' / 'sub'):
+        assert metas(read(directory / 'index.html'), 'go-import') == [external.go_import]
+    assert f'<title>{SITE}/lib/external/sub</title>' in read(output / 'lib' / 'external' / 'sub' / 'index.html')
+    assert result.pages == 3
+
+
 def test_write_site_vanity_and_external_rules(tmp_path: Path) -> None:
     output = tmp_path / 'site'
     rules = [

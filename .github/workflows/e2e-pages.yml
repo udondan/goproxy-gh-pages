@@ -42,7 +42,7 @@ jobs:
           output: ${{ runner.temp }}/{name}-{version}.zip
 
       - id: build
-        uses: ./
+        uses: ./build
         with:
           zips: ${{ steps.pack.outputs.zip }}
           release-assets: ""

@@ -62,7 +62,7 @@ jobs:
           release-tag: ${{ github.event.release.tag_name }}
 
       - id: build
-        uses: udondan/goproxy-gh-pages@v1
+        uses: udondan/goproxy-gh-pages/build@v1
 
       - uses: actions/upload-pages-artifact@v5
         with:
@@ -101,7 +101,7 @@ Build the zips in the workflow and pass them to the build. The live site keeps t
     version: ${{ github.ref_name }}
 
 - id: build
-  uses: udondan/goproxy-gh-pages@v1
+  uses: udondan/goproxy-gh-pages/build@v1
   with:
     zips: ${{ steps.pack.outputs.zip }}
     release-assets: ''
@@ -118,7 +118,7 @@ Running the build with no new zips republishes the current site. Use this after 
 `go-import` pages can also point to a repository, for modules that are normal source in a repository but should have a path on your domain.
 
 ```yaml
-- uses: udondan/goproxy-gh-pages@v1
+- uses: udondan/goproxy-gh-pages/build@v1
   with:
     base-url: https://go.example.com
     modules: |
@@ -155,7 +155,7 @@ With `merge: true` the build adds its files to whatever is in the output directo
 
 ```yaml
 - run: make docs # writes _site
-- uses: udondan/goproxy-gh-pages@v1
+- uses: udondan/goproxy-gh-pages/build@v1
   with:
     merge: true
 ```
@@ -187,7 +187,7 @@ The seed action can wait without seeding, for example in a workflow that consume
 
 ## Actions
 
-### `udondan/goproxy-gh-pages@v1` (build)
+### `udondan/goproxy-gh-pages/build@v1`
 
 | Input            | Default                                | Description                                                                                                     |
 | ---------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------- |

@@ -4,7 +4,8 @@
 
 | Path                    | Content                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------- |
-| `action.yml`            | build action                                                                    |
+| `build/action.yml`      | build action                                                                    |
+| `action.yml`            | copy of the build action for the Marketplace, which lists only the root action  |
 | `pack/action.yml`       | pack action                                                                     |
 | `seed/action.yml`       | seed action                                                                     |
 | `run.sh`                | finds Python 3.10+ on the runner and runs the package with `-I`                 |

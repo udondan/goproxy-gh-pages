@@ -6,7 +6,7 @@ rules:
         "actions/*": ref-pin
         "github/*": ref-pin
         "*": hash-pin
-  # The actions of this repository are tested from the checkout with `uses: ./`. actionlint
+  # The actions of this repository are tested from the checkout with `uses: ./<action>`. actionlint
   # doesn't know the `$/` syntax yet.
   self-repository:
     disable: true

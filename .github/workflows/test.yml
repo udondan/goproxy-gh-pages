@@ -164,7 +164,7 @@ jobs:
           time: "2024-01-02T03:04:05Z"
 
       - id: build
-        uses: ./
+        uses: ./build
         with:
           base-url: https://example.com/action
           output: ${{ runner.temp }}/site

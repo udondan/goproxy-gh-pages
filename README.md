@@ -1,5 +1,17 @@
 # goproxy-gh-pages
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/header-dark.webp">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/header-light.webp">
+  <img alt="goproxy-gh-pages: Go modules, served from GitHub Pages" src="docs/images/header-light.webp">
+</picture>
+
+[![Release](https://img.shields.io/github/v/release/udondan/goproxy-gh-pages)](https://github.com/udondan/goproxy-gh-pages/releases/latest)
+[![Marketplace](https://img.shields.io/badge/marketplace-goproxy--gh--pages-blue?logo=github)](https://github.com/marketplace/actions/go-module-proxy-on-github-pages)
+[![Test](https://github.com/udondan/goproxy-gh-pages/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/udondan/goproxy-gh-pages/actions/workflows/test.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/udondan/goproxy-gh-pages/graph/badge.svg)](https://codecov.io/gh/udondan/goproxy-gh-pages)
+[![License](https://img.shields.io/github/license/udondan/goproxy-gh-pages)](LICENSE)
+
 Publish Go modules from GitHub Pages as a static Go module proxy, without committing the module source to a repository.
 
 ## The problem

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/udondan/goproxy-gh-pages/compare/v1.0.0...v1.1.0) (2026-11-11)
+
+
+### Features
+
+* build action at udondan/goproxy-gh-pages/build ([#5](https://github.com/udondan/goproxy-gh-pages/issues/5)) ([da132e0](https://github.com/udondan/goproxy-gh-pages/commit/da132e0809496649d606c0a307894cf3111daccb))
+
 ## 1.0.0 (2026-11-10)
 
 

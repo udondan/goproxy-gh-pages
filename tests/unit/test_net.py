@@ -51,7 +51,7 @@ def test_api_url_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('GITHUB_API_URL', 'https://ghe.example.com/api/v3/')
     client = Client(token='t')
     assert client.api_url == 'https://ghe.example.com/api/v3'
-    assert 'ghe.example.com' in client._token_hosts
+    assert client._token_hosts >= {'ghe.example.com'}
     assert Client().api_url == 'https://ghe.example.com/api/v3'
     monkeypatch.delenv('GITHUB_API_URL')
     assert Client().api_url == 'https://api.github.com'

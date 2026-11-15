@@ -19,6 +19,27 @@ defaults:
     shell: bash
 
 jobs:
+  # Queues the runs of pull requests and main, pull requests first, so only one
+  # run is tested at a time. Pull requests from forks get a read-only token and
+  # skip the wait.
+  boarding-gate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: write # lock refs under refs/boarding-gate/
+      pull-requests: read # labels for label-weights
+      statuses: write # queue position as commit status
+    # Queue order, the concurrency group that cancels outdated waiting runs and
+    # the rebase of branches that are behind main: see
+    # https://github.com/udondan/boarding-gate#reusable-workflow
+    # The rebase needs OVERRIDE_TOKEN: pushes with github.token don't start new runs.
+    uses: udondan/boarding-gate/.github/workflows/boarding-gate.yml@v1
+    secrets:
+      update-token: ${{ secrets.OVERRIDE_TOKEN }}
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -44,6 +65,9 @@ jobs:
 
   unit:
     name: Unit tests (Python ${{ matrix.python }}, ${{ matrix.os }})
+    needs: boarding-gate
+    # The wait is skipped for forks.
+    if: ${{ !cancelled() && (needs.boarding-gate.result == 'success' || needs.boarding-gate.result == 'skipped') }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -90,7 +114,8 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     needs: [unit]
-    if: github.event_name == 'pull_request' && needs.unit.result == 'success'
+    # !cancelled(): boarding-gate is skipped for forks.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.unit.result == 'success' }}
     timeout-minutes: 10
     permissions:
       checks: read
@@ -244,7 +269,15 @@ jobs:
 
   # The only test check the ruleset requires, whatever jobs are added later.
   required:
-    needs: [lint, unit, coverage, compat, action, benchmark, workflows]
+    needs:
+      - boarding-gate
+      - lint
+      - unit
+      - coverage
+      - compat
+      - action
+      - benchmark
+      - workflows
     if: always()
     runs-on: ubuntu-latest
     steps:

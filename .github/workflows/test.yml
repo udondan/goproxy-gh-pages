@@ -269,7 +269,15 @@ jobs:
 
   # The only test check the ruleset requires, whatever jobs are added later.
   required:
-    needs: [boarding-gate, lint, unit, coverage, compat, action, benchmark, workflows]
+    needs:
+      - boarding-gate
+      - lint
+      - unit
+      - coverage
+      - compat
+      - action
+      - benchmark
+      - workflows
     if: always()
     runs-on: ubuntu-latest
     steps:

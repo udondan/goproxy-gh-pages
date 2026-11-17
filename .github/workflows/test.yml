@@ -164,7 +164,8 @@ jobs:
 
   # Codecov reports its result as the check runs codecov/project and
   # codecov/patch. This job waits for them, so a coverage drop fails the
-  # required job. It passes with a warning if Codecov doesn't report in time.
+  # required job. If Codecov doesn't report in time, it passes with a warning
+  # and only the 100% threshold of the tests is checked.
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -196,7 +197,7 @@ jobs:
             fi
             sleep 10
           done
-          echo "::warning::Codecov didn't report within 5 minutes, coverage is not checked."
+          echo "::warning::Codecov didn't report within 5 minutes, only the 100% threshold of the tests is checked."
 
   # The zips and hashes compared with golang.org/x/mod, and a built site used by the go command
   compat:

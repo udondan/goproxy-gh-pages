@@ -1,0 +1,76 @@
+name: Pack a Go module
+description: Create a reproducible Go module zip and optionally upload it as a release asset
+author: Daniel Schroeder
+branding:
+  icon: archive
+  color: blue
+
+inputs:
+  module-dir:
+    description: Directory with the go.mod of the module
+    required: true
+  version:
+    description: Version of the module, with or without the leading v
+    required: true
+  output:
+    description: >-
+      Path of the zip. Placeholders: {name} (repository name, else the last element of the module path),
+      {module} (escaped module path), {version}, {major}.
+    default: "{name}-go-module-{version}.zip"
+  time:
+    description: >-
+      Time of the version (RFC 3339 or Unix seconds). Defaults to SOURCE_DATE_EPOCH, else the time of the
+      HEAD commit. The same input creates the same zip.
+    default: ""
+  compression-level:
+    description: Deflate level, 0 to 9
+    default: "9"
+  release-tag:
+    description: Upload the zip as an asset of this release. Draft releases work too.
+    default: ""
+  asset-name:
+    description: Name of the release asset. Defaults to the file name of the zip.
+    default: ""
+  repository:
+    description: Repository of the release
+    default: ${{ github.repository }}
+  token:
+    description: Token to upload the release asset with
+    default: ${{ github.token }}
+
+outputs:
+  zip:
+    description: Path of the zip
+    value: ${{ steps.pack.outputs.zip }}
+  module:
+    description: Module path
+    value: ${{ steps.pack.outputs.module }}
+  version:
+    description: Version
+    value: ${{ steps.pack.outputs.version }}
+  time:
+    description: Time of the version
+    value: ${{ steps.pack.outputs.time }}
+  h1:
+    description: Hash of the zip as the checksum database records it
+    value: ${{ steps.pack.outputs.h1 }}
+  mod-h1:
+    description: Hash of the go.mod as the checksum database records it
+    value: ${{ steps.pack.outputs.mod-h1 }}
+
+runs:
+  using: composite
+  steps:
+    - id: pack
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../run.sh" action pack'
+      env:
+        INPUT_MODULE_DIR: ${{ inputs.module-dir }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_TIME: ${{ inputs.time }}
+        INPUT_COMPRESSION_LEVEL: ${{ inputs.compression-level }}
+        INPUT_RELEASE_TAG: ${{ inputs.release-tag }}
+        INPUT_ASSET_NAME: ${{ inputs.asset-name }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_TOKEN: ${{ inputs.token }}

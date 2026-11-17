@@ -1,0 +1,121 @@
+name: Go module proxy on GitHub Pages
+description: Build a static Go module proxy and go-import pages from release assets, local zips and the live site
+author: Daniel Schroeder
+branding:
+  icon: package
+  color: blue
+
+inputs:
+  output:
+    description: Directory to write the site to
+    default: _site
+  base-url:
+    description: >-
+      URL of the Pages site, which is also the root of the module paths. Defaults to the URL the
+      Pages API reports for the repository, which includes a custom domain, else
+      https://<owner>.github.io/<repo>.
+    default: ""
+  path:
+    description: Path of the proxy below the base URL. The GOPROXY URL is <base-url>/<path>.
+    default: go
+  modules:
+    description: >-
+      One line per module or path prefix: `<module>` or `<module> proxy` serves it from the proxy,
+      `<prefix> <vcs> <repo-url> [subdir]` writes vanity import pages, `<prefix> mod <proxy-url>`
+      points to another proxy. Empty serves every module that is found.
+    default: ""
+  zips:
+    description: Module zips to add, one path or glob per line
+    default: ""
+  repository:
+    description: Repository to read release assets from
+    default: ${{ github.repository }}
+  release-assets:
+    description: Glob patterns of release assets that may be module zips, one per line. Empty disables release assets.
+    default: "*.zip"
+  releases:
+    description: Number of the newest releases to read assets from
+    default: "30"
+  include-drafts:
+    description: Include assets of draft releases
+    default: "true"
+  mirror:
+    description: Keep the versions the live site serves, also when no other source has them anymore
+    default: "true"
+  fallback-proxy:
+    description: >-
+      Proxy to download listed versions from that no other source has. The cached-only endpoint never
+      makes the proxy fetch from the origin. Empty disables it.
+    default: https://proxy.golang.org/cached-only
+  keep:
+    description: Number of the newest versions to keep per module. The newest version of each major version is always kept.
+    default: "30"
+  verify-sumdb:
+    description: Fail if a version differs from what the checksum database recorded
+    default: "true"
+  merge:
+    description: Keep files that are already in the output directory, such as a documentation site
+    default: "false"
+  home-url:
+    description: Where the root page and the go-source links point to. Defaults to the repository.
+    default: ""
+  redirect-root:
+    description: Make the root page a redirect to home-url instead of a list of modules
+    default: "true"
+  not-found-page:
+    description: Write a 404.html with go-import tags for paths without a page
+    default: "true"
+  max-size:
+    description: Size limit of the site. Pages sites can have up to 1 GB.
+    default: 1GiB
+  parallelism:
+    description: Number of parallel downloads
+    default: "8"
+  token:
+    description: Token to read releases with
+    default: ${{ github.token }}
+
+outputs:
+  path:
+    description: Directory of the site
+    value: ${{ steps.build.outputs.path }}
+  base-url:
+    description: URL of the site
+    value: ${{ steps.build.outputs.base-url }}
+  proxy-url:
+    description: URL of the proxy, for GOPROXY
+    value: ${{ steps.build.outputs.proxy-url }}
+  modules:
+    description: JSON object of the modules on the proxy and their versions
+    value: ${{ steps.build.outputs.modules }}
+  new-versions:
+    description: JSON list of module@version the live site doesn't serve yet, input for the seed action
+    value: ${{ steps.build.outputs.new-versions }}
+
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../run.sh" action build'
+      env:
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_BASE_URL: ${{ inputs.base-url }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_MODULES: ${{ inputs.modules }}
+        INPUT_ZIPS: ${{ inputs.zips }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_RELEASE_ASSETS: ${{ inputs.release-assets }}
+        INPUT_RELEASES: ${{ inputs.releases }}
+        INPUT_INCLUDE_DRAFTS: ${{ inputs.include-drafts }}
+        INPUT_MIRROR: ${{ inputs.mirror }}
+        INPUT_FALLBACK_PROXY: ${{ inputs.fallback-proxy }}
+        INPUT_KEEP: ${{ inputs.keep }}
+        INPUT_VERIFY_SUMDB: ${{ inputs.verify-sumdb }}
+        INPUT_MERGE: ${{ inputs.merge }}
+        INPUT_HOME_URL: ${{ inputs.home-url }}
+        INPUT_REDIRECT_ROOT: ${{ inputs.redirect-root }}
+        INPUT_NOT_FOUND_PAGE: ${{ inputs.not-found-page }}
+        INPUT_MAX_SIZE: ${{ inputs.max-size }}
+        INPUT_PARALLELISM: ${{ inputs.parallelism }}
+        INPUT_TOKEN: ${{ inputs.token }}

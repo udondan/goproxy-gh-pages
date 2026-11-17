@@ -1,0 +1,62 @@
+name: Seed Go module versions
+description: Make proxy.golang.org and sum.golang.org fetch new versions, and wait until consumers can use them
+author: Daniel Schroeder
+branding:
+  icon: send
+  color: blue
+
+inputs:
+  versions:
+    description: module@version, one per line, or the JSON list of the new-versions output of the build action
+    required: true
+  site-url:
+    description: >-
+      Proxy URL of the Pages site (proxy-url output of the build action). The versions are seeded once the
+      site serves them, so the public proxy doesn't cache a miss.
+    default: ""
+  seed:
+    description: Request the versions from the public proxy. false only waits.
+    default: "true"
+  wait-for:
+    description: >-
+      Comma separated targets to wait for: proxy (pinned versions resolve), latest (@latest resolves),
+      sumdb (checksum database has the hashes), index (index.golang.org lists it), pkgsite (pkg.go.dev
+      shows the documentation), or none
+    default: proxy
+  wait-interval:
+    description: Seconds between polls; polls back off up to six times this
+    default: "10"
+  wait-timeout:
+    description: Seconds to wait in total
+    default: "900"
+  fail-on-timeout:
+    description: Fail if a target doesn't have every version in time; false only warns
+    default: "true"
+  proxy:
+    description: Public Go module proxy
+    default: https://proxy.golang.org
+  sumdb:
+    description: Checksum database
+    default: https://sum.golang.org
+
+outputs:
+  available:
+    description: JSON object of target → module@version → seconds until it was available
+    value: ${{ steps.seed.outputs.available }}
+
+runs:
+  using: composite
+  steps:
+    - id: seed
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../run.sh" action seed'
+      env:
+        INPUT_VERSIONS: ${{ inputs.versions }}
+        INPUT_SITE_URL: ${{ inputs.site-url }}
+        INPUT_SEED: ${{ inputs.seed }}
+        INPUT_WAIT_FOR: ${{ inputs.wait-for }}
+        INPUT_WAIT_INTERVAL: ${{ inputs.wait-interval }}
+        INPUT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
+        INPUT_FAIL_ON_TIMEOUT: ${{ inputs.fail-on-timeout }}
+        INPUT_PROXY: ${{ inputs.proxy }}
+        INPUT_SUMDB: ${{ inputs.sumdb }}

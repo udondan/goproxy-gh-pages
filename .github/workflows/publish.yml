@@ -1,0 +1,58 @@
+---
+name: Publish release
+
+permissions:
+  contents: read
+
+# release-please.yml starts this workflow with the tag of the draft release that release-please
+# created. The major version tag (v1) is moved to the release, then the release is published.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the draft release to publish, e.g. v1.2.3
+        type: string
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the release
+        id: release
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a release version"
+            exit 1
+          fi
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != "true" ]]; then
+            echo "::error::Release $TAG is not a draft"
+            exit 1
+          fi
+          echo "major=v${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.OVERRIDE_TOKEN }} # draft releases need write access
+          TAG: ${{ inputs.tag }}
+
+      # Users reference the action by its major version tag
+      - name: Move ${{ steps.release.outputs.major }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" -f sha="$SHA" -F force=true > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$MAJOR" -f sha="$SHA" > /dev/null
+          fi
+          echo "$MAJOR points to $SHA"
+        env:
+          GH_TOKEN: ${{ secrets.OVERRIDE_TOKEN }}
+          MAJOR: ${{ steps.release.outputs.major }}
+          SHA: ${{ steps.release.outputs.sha }}
+
+      - name: Publish the release
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.OVERRIDE_TOKEN }}
+          TAG: ${{ inputs.tag }}

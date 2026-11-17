@@ -1,0 +1,4 @@
+.claude/
+.venv/
+CHANGELOG.md
+tests/compat/testdata/

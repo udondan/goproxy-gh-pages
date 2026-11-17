@@ -21,8 +21,10 @@ defaults:
 jobs:
   # Queues the runs of pull requests and main, pull requests first, so only one
   # run is tested at a time. Pull requests from forks get a read-only token and
-  # skip the wait.
+  # skip the wait. All other jobs wait for it: while another run holds the
+  # turn, this one likely needs a rebase anyway.
   boarding-gate:
+    name: Queue
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push' ||
@@ -40,16 +42,61 @@ jobs:
     secrets:
       update-token: ${{ secrets.OVERRIDE_TOKEN }}
 
+  # The tests only run if code or build config changed. Skipped outside of
+  # pull requests, so pushes to main always run them.
+  changes:
+    needs: boarding-gate
+    # Fail instead of skip if boarding-gate failed, see the unit job.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists the PR's files via the API
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            code:
+              - goproxy_gh_pages/**
+              - tests/**
+              - action.yml
+              - pack/**
+              - build/**
+              - seed/**
+              - run.sh
+              - pyproject.toml
+              - uv.lock
+              - mise.toml
+              - Makefile
+              - codecov.yml
+              - .github/workflows/test.yml
+
+  # Runs on every change, as prettier also checks the docs.
   lint:
+    needs: boarding-gate
+    # Fail instead of skip if boarding-gate failed, see the unit job.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # uv from mise.toml
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          enable-cache: true
+          install_args: uv
 
       - name: ruff check
         run: uv run ruff check . --output-format github
@@ -65,9 +112,11 @@ jobs:
 
   unit:
     name: Unit tests (Python ${{ matrix.python }}, ${{ matrix.os }})
-    needs: boarding-gate
-    # The wait is skipped for forks.
-    if: ${{ !cancelled() && (needs.boarding-gate.result == 'success' || needs.boarding-gate.result == 'skipped') }}
+    needs: [boarding-gate, changes]
+    # A skipped job counts as passed for required checks. Run the job even if
+    # boarding-gate failed and fail it in the first step. The wait is skipped
+    # for forks. Skipped if no code changed.
+    if: ${{ !cancelled() && (needs.changes.result == 'skipped' || (needs.changes.result == 'success' && needs.changes.outputs.code == 'true')) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -82,15 +131,21 @@ jobs:
             python: "3.14"
           - os: windows-latest
             python: "3.14"
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # uv from mise.toml, Python from the matrix
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          enable-cache: true
-          python-version: ${{ matrix.python }}
+          install_args: uv
 
       - name: Test
         run: |
@@ -146,8 +201,15 @@ jobs:
   # The zips and hashes compared with golang.org/x/mod, and a built site used by the go command
   compat:
     name: Go compatibility
+    needs: [boarding-gate, unit]
+    # Only runs if the unit tests passed. They are skipped if no code changed.
+    if: ${{ !cancelled() && needs.unit.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -163,12 +225,19 @@ jobs:
   # The actions as users run them: with the Python of the runner, nothing installed
   action:
     name: Action (${{ matrix.os }})
+    needs: [boarding-gate, unit]
+    # Only runs if the unit tests passed. They are skipped if no code changed.
+    if: ${{ !cancelled() && needs.unit.result == 'success' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -231,27 +300,42 @@ jobs:
           grep -q 'content="example.com/action/test mod https://example.com/action/go"' "$SITE/test/sub/index.html"
 
   benchmark:
+    needs: [boarding-gate, unit]
+    # Only runs if the unit tests passed. They are skipped if no code changed.
+    if: ${{ !cancelled() && needs.unit.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # uv from mise.toml
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          enable-cache: true
+          install_args: uv
 
       - name: Benchmark
         run: make bench
 
   workflows:
+    needs: boarding-gate
+    # Fail instead of skip if boarding-gate failed, see the unit job.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check turn
+        if: needs.boarding-gate.result == 'failure' || needs.boarding-gate.result == 'cancelled'
+        run: exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           install_args: actionlint shellcheck zizmor
 
@@ -271,6 +355,7 @@ jobs:
   required:
     needs:
       - boarding-gate
+      - changes
       - lint
       - unit
       - coverage

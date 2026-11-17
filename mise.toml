@@ -1,4 +1,7 @@
 [tools]
+# Installed by the Test workflow with jdx/mise-action. The unit tests take the
+# Python versions from their matrix.
+uv = "0.13.8"
 # Workflow linting in test.yml
 actionlint = "1.7.12"
 # The runner's own shellcheck is older and reports differently. actionlint runs it over every `run:` block.

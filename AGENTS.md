@@ -36,10 +36,11 @@
 [uv](https://docs.astral.sh/uv/) runs the dev tools, [mise](https://mise.jdx.dev/) installs uv and the others. Their versions are only in `mise.toml`.
 
 ```sh
-make lint    # ruff, mypy, actionlint, zizmor, prettier
-make test    # unit tests with coverage
-make compat  # needs Go
-make bench   # build benchmark with many large versions
+make lint      # ruff, mypy, actionlint, zizmor, prettier
+make test      # unit tests
+make coverage  # unit tests with coverage, fails below 100%
+make compat    # needs Go
+make bench     # build benchmark with many large versions
 ```
 
 CI (`.github/workflows/test.yml`): every job waits for boarding-gate and fails if it failed, as a run waiting for its turn likely needs a rebase anyway. On pull requests, the `changes` job (`dorny/paths-filter`) decides whether the unit tests run. The Go compatibility, action and benchmark jobs only run after the unit tests passed. When the code or the tests start depending on another file, add it to that filter, or the tests silently skip.
